@@ -1,0 +1,12 @@
+[submodule "3rd_party/ECMake"]
+	path = 3rd_party/ECMake
+	url = https://github.com/R533-Code/ECMake.git
+[submodule "3rd_party/nanobench"]
+	path = 3rd_party/nanobench
+	url = https://github.com/martinus/nanobench.git
+[submodule "3rd_party/doctest"]
+	path = 3rd_party/doctest
+	url = https://github.com/doctest/doctest.git
+[submodule "src/contracts/3rd_party/cpptrace"]
+	path = src/contracts/3rd_party/cpptrace
+	url = https://github.com/jeremy-rifkin/cpptrace.git
