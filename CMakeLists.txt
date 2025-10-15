@@ -40,6 +40,11 @@ add_subdirectory("3rd_party/ECMake")
 ec_add_subdirectory_static("3rd_party/doctest")
 
 # ###########################
+# Setup benchmark framework
+# ###########################
+ec_add_subdirectory_static("3rd_party/nanobench")
+
+# ###########################
 # Setup stdcolt
 # ###########################
 ec_namespace(stdcolt)
