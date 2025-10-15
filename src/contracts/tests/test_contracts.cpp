@@ -3,7 +3,7 @@
 
 static unsigned violation_counts = 0;
 
-TEST_CASE("contract macros")
+TEST_CASE("stdcolt/contracts")
 {
   using namespace stdcolt::contracts;
 
