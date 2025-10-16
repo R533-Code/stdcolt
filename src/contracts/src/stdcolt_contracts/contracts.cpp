@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cpptrace/cpptrace.hpp>
 
+#include <stdcolt_debugging/debugging.h>
 #include "contracts.h"
 
 namespace stdcolt::contracts
@@ -95,6 +96,7 @@ namespace stdcolt::contracts
       std::fprintf(stderr, "\n  %s", str.c_str());
 
     std::fflush(stderr);
+    stdcolt::breakpoint_if_debugging();
     std::abort();
   }
 
