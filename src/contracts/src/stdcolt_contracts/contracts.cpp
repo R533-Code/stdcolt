@@ -16,7 +16,7 @@ namespace stdcolt::contracts
   void unreachable(const std::source_location& loc) noexcept
   {
     violation_handler(
-        "lars::contracts::unreachable()", "An unreachable branch was hit.",
+        "stdcolt::contracts::unreachable()", "An unreachable branch was hit.",
         Kind::Assert, loc);
     std::abort();
   }
