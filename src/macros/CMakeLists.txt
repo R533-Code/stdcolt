@@ -1,0 +1,1 @@
+ec_add_library_static(macros)
