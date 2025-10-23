@@ -10,7 +10,7 @@ target_link_libraries(${_contracts}
     PUBLIC ${_debugging}
 )
 
-ec_add_tests(test-contracts
+ec_add_tests(test_contracts
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_contracts}
 )
