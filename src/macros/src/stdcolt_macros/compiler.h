@@ -63,8 +63,8 @@
   #define STDCOLT_IMPORT
 #endif
 
-#define STDCOLT_STRINGIFY_(x) #x
-#define STDCOLT_STRINGIFY(x)  STDCOLT_STRINGIFY_(x)
+#define __STDCOLT_STRINGIFY(x) #x
+#define STDCOLT_STRINGIFY(x)   __STDCOLT_STRINGIFY(x)
 
 #if STDCOLT_GCC || STDCOLT_CLANG
   #define STDCOLT_DO_PRAGMA(x) _Pragma(#x)
