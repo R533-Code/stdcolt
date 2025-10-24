@@ -25,6 +25,7 @@ STDCOLT_TYPE_ERASE_DECLARE_TYPE(
         .is_move_constructible = true,
         .alloc_fn              = &malloc_count,
         .dealloc_fn            = &free_count}),
+    // methods:
     STDCOLT_TYPE_ERASE_CONST_METHOD(double, apply, (double, a), (double, b)),
     STDCOLT_TYPE_ERASE_METHOD(double, apply, (double, a), (double, b)));
 
@@ -36,7 +37,9 @@ STDCOLT_TYPE_ERASE_DECLARE_TEMPLATE_TYPE(
         .is_move_constructible = true,
         .alloc_fn              = &malloc_count,
         .dealloc_fn            = &free_count}),
-    (typename, T), STDCOLT_TYPE_ERASE_CONST_METHOD(T, apply, (T, a), (T, b)),
+    (typename, T),
+    // methods:
+    STDCOLT_TYPE_ERASE_CONST_METHOD(T, apply, (T, a), (T, b)),
     STDCOLT_TYPE_ERASE_METHOD(T, apply, (T, a), (T, b)));
 
 struct BinarySum
@@ -56,7 +59,7 @@ struct BinaryProductHuge
   double apply(double a, double b) const noexcept { return a * b; }
 };
 
-TEST_CASE("colt_abi")
+TEST_CASE("stdcolt/type_erase")
 {
   using ABIBinaryFn         = test::BinaryFunction;
   using ABIBinaryFnRef      = test::BinaryFunctionRef;
