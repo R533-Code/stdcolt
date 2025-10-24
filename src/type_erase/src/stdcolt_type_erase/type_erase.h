@@ -260,235 +260,112 @@ namespace stdcolt::type_erase
   };
 } // namespace stdcolt::type_erase
 
-#define STDCOLT_TYPE_ERASE_DECLARE_TYPE(                                             \
-    NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, FN1, ...)                      \
-  namespace NAMESPACE                                                                \
-  {                                                                                  \
-    static constexpr auto STDCOLT_CC(TYPENAME, Customization) = CUSTOMIZATION;       \
-    static constexpr auto STDCOLT_CC(TYPENAME, VTableCustomization) =                \
-        STDCOLT_CC(TYPENAME, Customization).to_customize_vtable();                   \
-    template<                                                                        \
-        typename __ABI_T, stdcolt::type_erase::CustomizeVTable CUSTOM =              \
-                              NAMESPACE::STDCOLT_CC(TYPENAME, VTableCustomization)>  \
-    concept CONCEPT_NAME = STDCOLT_FOR_EACH_SYMBOL(                                  \
-        __COLT_MAKE_REQUIRE_CLAUSE, &&, FN1 __VA_OPT__(, ) __VA_ARGS__);             \
-    template<                                                                        \
-        stdcolt::type_erase::CustomizeVTable CUSTOM =                                \
-            STDCOLT_CC(TYPENAME, VTableCustomization)>                               \
-    struct STDCOLT_CC(TYPENAME, VTable)                                              \
-        : public stdcolt::type_erase::TypeSize                                       \
-        , public stdcolt::type_erase::FunctionCount                                  \
-        , public stdcolt::type_erase::DestructorFn                                   \
-        , public stdcolt::type_erase::TypeOrEmpty<                                   \
-              CUSTOM.is_copy_constructible, stdcolt::type_erase::CopyConstructorFn>  \
-        , public stdcolt::type_erase::TypeOrEmpty<                                   \
-              CUSTOM.is_move_constructible, stdcolt::type_erase::MoveConstructorFn>  \
-    {                                                                                \
-      static constexpr size_t FUNCTION_COUNT =                                       \
-          __COLT_MAKE_COUNT_PACK(FN1 __VA_OPT__(, ) __VA_ARGS__);                    \
-      STDCOLT_FOR_EACH(                                                              \
-          __COLT_MAKE_TYPE_ERASED_FN_PTRS, FN1 __VA_OPT__(, ) __VA_ARGS__)           \
-      template<::NAMESPACE::CONCEPT_NAME<CUSTOM> __ABI_T>                            \
-      static constexpr STDCOLT_CC(TYPENAME, VTable) make_vtable_object() noexcept    \
-      {                                                                              \
-        using namespace stdcolt::type_erase;                                         \
-        TypeOrEmpty<CUSTOM.is_copy_constructible, CopyConstructorFn> cc{};           \
-        if constexpr (CUSTOM.is_copy_constructible)                                  \
-          cc.value.template make_erased_for<__ABI_T>();                              \
-        TypeOrEmpty<CUSTOM.is_move_constructible, MoveConstructorFn> mc{};           \
-        if constexpr (CUSTOM.is_move_constructible)                                  \
-          mc.value.template make_erased_for<__ABI_T>();                              \
-        DestructorFn dt{};                                                           \
-        dt.template make_erased_for<__ABI_T>();                                      \
-        STDCOLT_CC(TYPENAME, VTable)                                                 \
-        table = {                                                                    \
-            TypeSize{sizeof(__ABI_T)},                                               \
-            FunctionCount{FUNCTION_COUNT},                                           \
-            dt,                                                                      \
-            cc,                                                                      \
-            mc,                                                                      \
-            STDCOLT_FOR_EACH_COMMA(                                                  \
-                __COLT_MAKE_TYPE_ERASED_LAMBDAS, FN1 __VA_OPT__(, ) __VA_ARGS__)};   \
-        return table;                                                                \
-      }                                                                              \
-      template<::NAMESPACE::CONCEPT_NAME<CUSTOM> __ABI_T>                            \
-          static const STDCOLT_CC(TYPENAME, VTable) * make_vtable() noexcept         \
-      {                                                                              \
-        static constexpr auto table = make_vtable_object<__ABI_T>();                 \
-        return &table;                                                               \
-      }                                                                              \
-    };                                                                               \
-    template<                                                                        \
-        stdcolt::type_erase::CustomizeABI CUSTOM =                                   \
-            STDCOLT_CC(TYPENAME, Customization)>                                     \
-    struct STDCOLT_CC(TYPENAME, Template)                                            \
-    {                                                                                \
-      using vtable_t =                                                               \
-          const STDCOLT_CC(TYPENAME, VTable)<CUSTOM.to_customize_vtable()>;          \
-      static_assert(alignof(vtable_t) > 2);                                          \
-      static constexpr size_t INLINE_BUFFER_SIZE =                                   \
-          stdcolt::type_erase::align_up<alignof(void*)>(CUSTOM.inline_buffer_size);  \
-                                                                                     \
-    private:                                                                         \
-      vtable_t* _vtable;                                                             \
-      union                                                                          \
-      {                                                                              \
-        alignas(std::max_align_t) char _buffer[INLINE_BUFFER_SIZE];                  \
-        void* _heap;                                                                 \
-      };                                                                             \
-      inline bool on_stack() const noexcept                                          \
-      {                                                                              \
-        return !stdcolt::type_erase::test_lowest_bit(_vtable);                       \
-      }                                                                              \
-      inline bool on_heap() const noexcept                                           \
-      {                                                                              \
-        return !on_stack();                                                          \
-      }                                                                              \
-      inline const void* get_ptr() const noexcept                                    \
-      {                                                                              \
-        return stdcolt::type_erase::test_lowest_bit(_vtable) ? _heap : _buffer;      \
-      }                                                                              \
-      inline void* get_ptr() noexcept                                                \
-      {                                                                              \
-        return stdcolt::type_erase::test_lowest_bit(_vtable) ? _heap : _buffer;      \
-      }                                                                              \
-      inline vtable_t* get_vtable() const noexcept                                   \
-      {                                                                              \
-        return stdcolt::type_erase::clear_lowest_bit(_vtable);                       \
-      }                                                                              \
-                                                                                     \
-    public:                                                                          \
-      STDCOLT_CC(TYPENAME, Template)() = delete;                                     \
-      STDCOLT_CC(TYPENAME, Template)(const STDCOLT_CC(TYPENAME, Template) &)         \
-        requires(!CUSTOM.is_copy_constructible)                                      \
-      = delete;                                                                      \
-      STDCOLT_CC(TYPENAME, Template)(STDCOLT_CC(TYPENAME, Template) &&)              \
-        requires(!CUSTOM.is_move_constructible)                                      \
-      = delete;                                                                      \
-      ~STDCOLT_CC(TYPENAME, Template)()                                              \
-      {                                                                              \
-        get_vtable()->DestructorFn::value(get_ptr());                                \
-        if (on_heap())                                                               \
-          CUSTOM.dealloc_fn(_heap);                                                  \
-      }                                                                              \
-      template<typename __ABI_T>                                                     \
-        requires(::NAMESPACE::CONCEPT_NAME<__ABI_T, CUSTOM.to_customize_vtable()>)   \
-                && (!std::same_as<__ABI_T, STDCOLT_CC(TYPENAME, Template)>)          \
-      explicit STDCOLT_CC(TYPENAME, Template)(__ABI_T && obj)                        \
-          : _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>())  \
-      {                                                                              \
-        using abi_type_t = std::remove_cvref_t<__ABI_T>;                             \
-        if constexpr (sizeof(abi_type_t) <= INLINE_BUFFER_SIZE)                      \
-          new (_buffer) abi_type_t(std::forward<__ABI_T>(obj));                      \
-        else                                                                         \
-        {                                                                            \
-          auto ptr = CUSTOM.alloc_fn(sizeof(abi_type_t));                            \
-          if (ptr == nullptr)                                                        \
-            throw std::bad_alloc{};                                                  \
-          __STDCOLT_TYPE_ERASE_TRY_RETHROW(                                          \
-              (new (ptr) abi_type_t(std::forward<__ABI_T>(obj))),                    \
-              CUSTOM.dealloc_fn(ptr));                                               \
-          _heap   = ptr;                                                             \
-          _vtable = stdcolt::type_erase::set_lowest_bit(_vtable);                    \
-        }                                                                            \
-      }                                                                              \
-      /* COPY CONSTRUCTOR */ __COLT_MAKE_ABI_TYPE_CONSTRUCTOR(                       \
-          STDCOLT_CC(TYPENAME, Template), const&, CUSTOM.is_copy_constructible,      \
-          (get_vtable()                                                              \
-               ->TypeOrEmpty<                                                        \
-                   CUSTOM.is_copy_constructible,                                     \
-                   stdcolt::type_erase::CopyConstructorFn>::value.value))            \
-      /* MOVE CONSTRUCTOR */ __COLT_MAKE_ABI_TYPE_CONSTRUCTOR(                       \
-          STDCOLT_CC(TYPENAME, Template), &&, CUSTOM.is_move_constructible,          \
-          (get_vtable()                                                              \
-               ->TypeOrEmpty<                                                        \
-                   CUSTOM.is_move_constructible,                                     \
-                   stdcolt::type_erase::MoveConstructorFn>::value.value))            \
-      /* DEFINE METHOD CALLS WITH VTABLE */ STDCOLT_FOR_EACH_1ARG(                   \
-          __COLT_MAKE_METHOD, __COLT_MAKE_METHOD_EMPTY_REQUIRE,                      \
-          FN1 __VA_OPT__(, ) __VA_ARGS__)                                            \
-    };                                                                               \
-    using TYPENAME = STDCOLT_CC(TYPENAME, Template)<>;                               \
-    template<                                                                        \
-        bool IS_CONST, stdcolt::type_erase::CustomizeVTable CUSTOM =                 \
-                           STDCOLT_CC(TYPENAME, VTableCustomization)>                \
-    struct STDCOLT_CC(TYPENAME, RefTemplate)                                         \
-    {                                                                                \
-      using vtable_t = const STDCOLT_CC(TYPENAME, VTable)<CUSTOM>;                   \
-                                                                                     \
-    private:                                                                         \
-      vtable_t* _vtable;                                                             \
-      std::conditional_t<IS_CONST, const void*, void*> _object;                      \
-      inline auto get_ptr() const noexcept                                           \
-      {                                                                              \
-        return _object;                                                              \
-      }                                                                              \
-      inline auto get_ptr() noexcept                                                 \
-      {                                                                              \
-        return _object;                                                              \
-      }                                                                              \
-      inline auto get_vtable() const noexcept                                        \
-      {                                                                              \
-        return _vtable;                                                              \
-      }                                                                              \
-                                                                                     \
-    public:                                                                          \
-      template<typename __ABI_T>                                                     \
-        requires(::NAMESPACE::CONCEPT_NAME<__ABI_T, CUSTOM>) && IS_CONST             \
-                    && (!std::same_as < __ABI_T,                                     \
-                        STDCOLT_CC(TYPENAME, RefTemplate) < false, CUSTOM >>)        \
-                    && (!std::same_as < __ABI_T,                                     \
-                        STDCOLT_CC(TYPENAME, RefTemplate) < true, CUSTOM >>)         \
-      explicit STDCOLT_CC(TYPENAME, RefTemplate)(const __ABI_T& obj)                 \
-          : _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>())  \
-          , _object(&obj)                                                            \
-      {                                                                              \
-      }                                                                              \
-      template<typename __ABI_T>                                                     \
-        requires(::NAMESPACE::CONCEPT_NAME<__ABI_T, CUSTOM>) && (!IS_CONST)          \
-                    && (!std::same_as < __ABI_T,                                     \
-                        STDCOLT_CC(TYPENAME, RefTemplate) < false, CUSTOM >>)        \
-                    && (!std::same_as < __ABI_T,                                     \
-                        STDCOLT_CC(TYPENAME, RefTemplate) < true, CUSTOM >>)         \
-      explicit STDCOLT_CC(TYPENAME, RefTemplate)(__ABI_T & obj)                      \
-          : _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>())  \
-          , _object(&obj)                                                            \
-      {                                                                              \
-      }                                                                              \
-      STDCOLT_CC(TYPENAME, RefTemplate)(                                             \
-          const STDCOLT_CC(TYPENAME, RefTemplate) &) noexcept = default;             \
-      STDCOLT_CC(TYPENAME, RefTemplate)(                                             \
-          STDCOLT_CC(TYPENAME, RefTemplate) &&) noexcept = default;                  \
-      STDCOLT_CC(TYPENAME, RefTemplate) & operator=(                                 \
-          const STDCOLT_CC(TYPENAME, RefTemplate) &) noexcept = default;             \
-      STDCOLT_CC(TYPENAME, RefTemplate) & operator=(                                 \
-          STDCOLT_CC(TYPENAME, RefTemplate) &&) noexcept = default;                  \
-      /* DEFINE METHOD CALLS WITH VTABLE */ STDCOLT_FOR_EACH_1ARG(                   \
-          __COLT_MAKE_METHOD, __COLT_MAKE_METHOD_CONST_REQUIRE,                      \
-          FN1 __VA_OPT__(, ) __VA_ARGS__)                                            \
-    };                                                                               \
-    using STDCOLT_CC(TYPENAME, Ref)      = STDCOLT_CC(TYPENAME, RefTemplate)<false>; \
-    using STDCOLT_CC(TYPENAME, ConstRef) = STDCOLT_CC(TYPENAME, RefTemplate)<true>;  \
-  }
+// ---------- tiny condition helpers ----------
+#define __COLT_DEPAREN(...) __VA_ARGS__
 
-#define STDCOLT_TYPE_ERASE_DECLARE_TEMPLATE_TYPE(                                   \
-    NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, TEMPLATE_PARAM, FN1, ...)     \
+#define __COLT_IF_COMMA_0
+#define __COLT_IF_COMMA_1 ,
+
+#define __COLT_TPARAM_SOLO(HAS, TP) __COLT_TPARAM_SOLO_##HAS(TP)
+#define __COLT_TPARAM_SOLO_0(TP)
+#define __COLT_TPARAM_SOLO_1(TP) STDCOLT_2D_1(TP) STDCOLT_2D_2(TP),
+
+#define __COLT_TPARAM_PREFIX(HAS, TP) __COLT_TPARAM_PREFIX_##HAS(TP)
+#define __COLT_TPARAM_PREFIX_0(TP)
+#define __COLT_TPARAM_PREFIX_1(TP) , STDCOLT_2D_1(TP) STDCOLT_2D_2(TP)
+
+#define __COLT_PARAM_PREFIX(HAS, TP) __COLT_PARAM_PREFIX_##HAS(TP)
+#define __COLT_PARAM_PREFIX_0(TP)
+#define __COLT_PARAM_PREFIX_1(TP) , STDCOLT_2D_2(TP)
+
+#define __COLT_TARGS(HAS, TP) __COLT_TARGS_##HAS(TP)
+#define __COLT_TARGS_0(TP)
+#define __COLT_TARGS_1(TP) STDCOLT_2D_2(TP),
+
+#define __COLT_CONCEPT_ARGS(HAS, TP) __COLT_CONCEPT_ARGS_##HAS(TP)
+#define __COLT_CONCEPT_ARGS_0(TP)    CUSTOM
+#define __COLT_CONCEPT_ARGS_1(TP)    STDCOLT_2D_2(TP), CUSTOM
+
+#define __COLT_VTABLE_T_ARGS(HAS, TP) __COLT_VTABLE_T_ARGS_##HAS(TP)
+#define __COLT_VTABLE_T_ARGS_0(TP)    CUSTOM.to_customize_vtable()
+#define __COLT_VTABLE_T_ARGS_1(TP)    STDCOLT_2D_2(TP), CUSTOM.to_customize_vtable()
+
+#define __COLT_VTABLE_ARGS(HAS, TP) __COLT_VTABLE_ARGS_##HAS(TP)
+#define __COLT_VTABLE_ARGS_0(TP)    CUSTOM
+#define __COLT_VTABLE_ARGS_1(TP)    STDCOLT_2D_2(TP), CUSTOM
+
+#define __COLT_DECLARE_PRIMARY_ALIAS_0(TYPENAME, TP) \
+  using TYPENAME = STDCOLT_CC(TYPENAME, Template)<>;
+
+#define __COLT_DECLARE_PRIMARY_ALIAS_1(TYPENAME, TP) \
+  template<STDCOLT_2D_1(TP) STDCOLT_2D_2(TP)>        \
+  using TYPENAME = STDCOLT_CC(TYPENAME, Template)<STDCOLT_2D_2(TP)>;
+
+#define __COLT_DECLARE_PRIMARY_ALIAS(HAS_TP, TYPENAME, TP) \
+  STDCOLT_CC(__COLT_DECLARE_PRIMARY_ALIAS_, HAS_TP)(TYPENAME, TP)
+
+// ---- helpers for RefTemplate / aliases ----
+#define __COLT_REFTPL_HEAD_0(TYPENAME, TP)                         \
+  template<                                                        \
+      bool IS_CONST, stdcolt::type_erase::CustomizeVTable CUSTOM = \
+                         STDCOLT_CC(TYPENAME, VTableCustomization)>
+#define __COLT_REFTPL_HEAD_1(TYPENAME, TP)              \
+  template<                                             \
+      STDCOLT_2D_1(TP) STDCOLT_2D_2(TP), bool IS_CONST, \
+      stdcolt::type_erase::CustomizeVTable CUSTOM =     \
+          STDCOLT_CC(TYPENAME, VTableCustomization)>
+#define __COLT_REFTPL_HEAD(HAS, TYPENAME, TP) \
+  STDCOLT_CC(__COLT_REFTPL_HEAD_, HAS)(TYPENAME, TP)
+
+#define __COLT_REFTPL_VTABLE_0(TYPENAME, TP) \
+  using vtable_t = const STDCOLT_CC(TYPENAME, VTable)<CUSTOM>;
+#define __COLT_REFTPL_VTABLE_1(TYPENAME, TP) \
+  using vtable_t = const STDCOLT_CC(TYPENAME, VTable)<STDCOLT_2D_2(TP), CUSTOM>;
+#define __COLT_REFTPL_VTABLE(HAS, TYPENAME, TP) \
+  STDCOLT_CC(__COLT_REFTPL_VTABLE_, HAS)(TYPENAME, TP)
+
+#define __COLT_REF_INSTANT_0(TP, TYPENAME, FLAG) \
+  STDCOLT_CC(TYPENAME, RefTemplate)<FLAG, CUSTOM>
+#define __COLT_REF_INSTANT_1(TP, TYPENAME, FLAG) \
+  STDCOLT_CC(TYPENAME, RefTemplate)<STDCOLT_2D_2(TP), FLAG, CUSTOM>
+#define __COLT_REF_INSTANT(HAS, TP, TYPENAME, FLAG) \
+  STDCOLT_CC(__COLT_REF_INSTANT_, HAS)(TP, TYPENAME, FLAG)
+
+#define __COLT_DECLARE_REF_ALIASES_0(TYPENAME, TP)                                 \
+  using STDCOLT_CC(TYPENAME, Ref)      = STDCOLT_CC(TYPENAME, RefTemplate)<false>; \
+  using STDCOLT_CC(TYPENAME, ConstRef) = STDCOLT_CC(TYPENAME, RefTemplate)<true>;
+#define __COLT_DECLARE_REF_ALIASES_1(TYPENAME, TP)                \
+  template<STDCOLT_2D_1(TP) STDCOLT_2D_2(TP)>                     \
+  using STDCOLT_CC(TYPENAME, Ref) =                               \
+      STDCOLT_CC(TYPENAME, RefTemplate)<STDCOLT_2D_2(TP), false>; \
+  template<STDCOLT_2D_1(TP) STDCOLT_2D_2(TP)>                     \
+  using STDCOLT_CC(TYPENAME, ConstRef) =                          \
+      STDCOLT_CC(TYPENAME, RefTemplate)<STDCOLT_2D_2(TP), true>;
+#define __COLT_DECLARE_REF_ALIASES(HAS, TYPENAME, TP) \
+  STDCOLT_CC(__COLT_DECLARE_REF_ALIASES_, HAS)(TYPENAME, TP)
+
+#define __STDCOLT_TYPE_ERASE_DECLARE_MERGED(                                        \
+    NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, HAS_TP, TEMPLATE_PARAM, FN1,  \
+    ...)                                                                            \
   namespace NAMESPACE                                                               \
   {                                                                                 \
     static constexpr auto STDCOLT_CC(TYPENAME, Customization) = CUSTOMIZATION;      \
     static constexpr auto STDCOLT_CC(TYPENAME, VTableCustomization) =               \
         STDCOLT_CC(TYPENAME, Customization).to_customize_vtable();                  \
+                                                                                    \
+    /* concept */                                                                   \
     template<                                                                       \
-        typename __ABI_T,                                                           \
-        STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM),                  \
+        typename __ABI_T __COLT_TPARAM_PREFIX(HAS_TP, TEMPLATE_PARAM),              \
         stdcolt::type_erase::CustomizeVTable CUSTOM =                               \
             NAMESPACE::STDCOLT_CC(TYPENAME, VTableCustomization)>                   \
     concept CONCEPT_NAME = STDCOLT_FOR_EACH_SYMBOL(                                 \
         __COLT_MAKE_REQUIRE_CLAUSE, &&, FN1 __VA_OPT__(, ) __VA_ARGS__);            \
+                                                                                    \
+    /* VTable */                                                                    \
     template<                                                                       \
-        STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM),                  \
-        stdcolt::type_erase::CustomizeVTable CUSTOM =                               \
-            STDCOLT_CC(TYPENAME, VTableCustomization)>                              \
+        __COLT_TPARAM_SOLO(HAS_TP, TEMPLATE_PARAM)                                  \
+            stdcolt::type_erase::CustomizeVTable CUSTOM =                           \
+                STDCOLT_CC(TYPENAME, VTableCustomization)>                          \
     struct STDCOLT_CC(TYPENAME, VTable)                                             \
         : public stdcolt::type_erase::TypeSize                                      \
         , public stdcolt::type_erase::FunctionCount                                 \
@@ -503,7 +380,8 @@ namespace stdcolt::type_erase
       STDCOLT_FOR_EACH(                                                             \
           __COLT_MAKE_TYPE_ERASED_FN_PTRS, FN1 __VA_OPT__(, ) __VA_ARGS__)          \
       template<                                                                     \
-          ::NAMESPACE::CONCEPT_NAME<STDCOLT_2D_2(TEMPLATE_PARAM), CUSTOM> __ABI_T>  \
+          ::NAMESPACE::CONCEPT_NAME<__COLT_CONCEPT_ARGS(HAS_TP, TEMPLATE_PARAM)>    \
+              __ABI_T>                                                              \
       static constexpr STDCOLT_CC(TYPENAME, VTable) make_vtable_object() noexcept   \
       {                                                                             \
         using namespace stdcolt::type_erase;                                        \
@@ -527,22 +405,24 @@ namespace stdcolt::type_erase
         return table;                                                               \
       }                                                                             \
       template<                                                                     \
-          ::NAMESPACE::CONCEPT_NAME<STDCOLT_2D_2(TEMPLATE_PARAM), CUSTOM> __ABI_T>  \
+          ::NAMESPACE::CONCEPT_NAME<__COLT_CONCEPT_ARGS(HAS_TP, TEMPLATE_PARAM)>    \
+              __ABI_T>                                                              \
           static const STDCOLT_CC(TYPENAME, VTable) * make_vtable() noexcept        \
       {                                                                             \
         static constexpr auto table = make_vtable_object<__ABI_T>();                \
         return &table;                                                              \
       }                                                                             \
     };                                                                              \
+                                                                                    \
+    /* Value wrapper */                                                             \
     template<                                                                       \
-        STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM),                  \
-        stdcolt::type_erase::CustomizeABI CUSTOM =                                  \
-            STDCOLT_CC(TYPENAME, Customization)>                                    \
+        __COLT_TPARAM_SOLO(HAS_TP, TEMPLATE_PARAM)                                  \
+            stdcolt::type_erase::CustomizeABI CUSTOM =                              \
+                STDCOLT_CC(TYPENAME, Customization)>                                \
     struct STDCOLT_CC(TYPENAME, Template)                                           \
     {                                                                               \
       using vtable_t = const STDCOLT_CC(                                            \
-          TYPENAME,                                                                 \
-          VTable)<STDCOLT_2D_2(TEMPLATE_PARAM), CUSTOM.to_customize_vtable()>;      \
+          TYPENAME, VTable)<__COLT_VTABLE_T_ARGS(HAS_TP, TEMPLATE_PARAM)>;          \
       static_assert(alignof(vtable_t) > 2);                                         \
       static constexpr size_t INLINE_BUFFER_SIZE =                                  \
           stdcolt::type_erase::align_up<alignof(void*)>(CUSTOM.inline_buffer_size); \
@@ -591,7 +471,7 @@ namespace stdcolt::type_erase
       }                                                                             \
       template<typename __ABI_T>                                                    \
         requires(::NAMESPACE::CONCEPT_NAME<                                         \
-                    __ABI_T, STDCOLT_2D_2(TEMPLATE_PARAM),                          \
+                    __ABI_T __COLT_PARAM_PREFIX(HAS_TP, TEMPLATE_PARAM),            \
                     CUSTOM.to_customize_vtable()>)                                  \
                 && (!std::same_as<__ABI_T, STDCOLT_CC(TYPENAME, Template)>)         \
       explicit STDCOLT_CC(TYPENAME, Template)(__ABI_T && obj)                       \
@@ -624,21 +504,14 @@ namespace stdcolt::type_erase
                ->TypeOrEmpty<                                                       \
                    CUSTOM.is_move_constructible,                                    \
                    stdcolt::type_erase::MoveConstructorFn>::value.value))           \
-      /* DEFINE METHOD CALLS WITH VTABLE */ STDCOLT_FOR_EACH_1ARG(                  \
+      /* methods */ STDCOLT_FOR_EACH_1ARG(                                          \
           __COLT_MAKE_METHOD, __COLT_MAKE_METHOD_EMPTY_REQUIRE,                     \
           FN1 __VA_OPT__(, ) __VA_ARGS__)                                           \
     };                                                                              \
-    template<STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM)>             \
-    using TYPENAME = STDCOLT_CC(TYPENAME, Template)<STDCOLT_2D_2(TEMPLATE_PARAM)>;  \
-    template<                                                                       \
-        STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM), bool IS_CONST,   \
-        stdcolt::type_erase::CustomizeVTable CUSTOM =                               \
-            STDCOLT_CC(TYPENAME, VTableCustomization)>                              \
+    __COLT_REFTPL_HEAD(HAS_TP, TYPENAME, TEMPLATE_PARAM)                            \
     struct STDCOLT_CC(TYPENAME, RefTemplate)                                        \
     {                                                                               \
-      using vtable_t =                                                              \
-          const STDCOLT_CC(TYPENAME, VTable)<STDCOLT_2D_2(TEMPLATE_PARAM), CUSTOM>; \
-                                                                                    \
+      __COLT_REFTPL_VTABLE(HAS_TP, TYPENAME, TEMPLATE_PARAM)                        \
     private:                                                                        \
       vtable_t* _vtable;                                                            \
       std::conditional_t<IS_CONST, const void*, void*> _object;                     \
@@ -658,16 +531,14 @@ namespace stdcolt::type_erase
     public:                                                                         \
       template<typename __ABI_T>                                                    \
         requires(::NAMESPACE::CONCEPT_NAME<                                         \
-                    __ABI_T, STDCOLT_2D_2(TEMPLATE_PARAM), CUSTOM>)                 \
+                    __ABI_T, __COLT_CONCEPT_ARGS(HAS_TP, TEMPLATE_PARAM)>)          \
                     && IS_CONST                                                     \
-                    && (!std::same_as < __ABI_T,                                    \
-                        STDCOLT_CC(TYPENAME, RefTemplate)                           \
-                            < STDCOLT_2D_2(TEMPLATE_PARAM),                         \
-                        false, CUSTOM >>)                                           \
-                    && (!std::same_as < __ABI_T,                                    \
-                        STDCOLT_CC(TYPENAME, RefTemplate)                           \
-                            < STDCOLT_2D_2(TEMPLATE_PARAM),                         \
-                        true, CUSTOM >>)                                            \
+                    && (!std::same_as<                                              \
+                        __ABI_T, __COLT_REF_INSTANT(                                \
+                                     HAS_TP, TEMPLATE_PARAM, TYPENAME, false)>)     \
+                    && (!std::same_as<                                              \
+                        __ABI_T, __COLT_REF_INSTANT(                                \
+                                     HAS_TP, TEMPLATE_PARAM, TYPENAME, true)>)      \
       explicit STDCOLT_CC(TYPENAME, RefTemplate)(const __ABI_T& obj)                \
           : _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>()) \
           , _object(&obj)                                                           \
@@ -675,16 +546,14 @@ namespace stdcolt::type_erase
       }                                                                             \
       template<typename __ABI_T>                                                    \
         requires(::NAMESPACE::CONCEPT_NAME<                                         \
-                    __ABI_T, STDCOLT_2D_2(TEMPLATE_PARAM), CUSTOM>)                 \
+                    __ABI_T, __COLT_CONCEPT_ARGS(HAS_TP, TEMPLATE_PARAM)>)          \
                     && (!IS_CONST)                                                  \
-                    && (!std::same_as < __ABI_T,                                    \
-                        STDCOLT_CC(TYPENAME, RefTemplate)                           \
-                            < STDCOLT_2D_2(TEMPLATE_PARAM),                         \
-                        false, CUSTOM >>)                                           \
-                    && (!std::same_as < __ABI_T,                                    \
-                        STDCOLT_CC(TYPENAME, RefTemplate)                           \
-                            < STDCOLT_2D_2(TEMPLATE_PARAM),                         \
-                        true, CUSTOM >>)                                            \
+                    && (!std::same_as<                                              \
+                        __ABI_T, __COLT_REF_INSTANT(                                \
+                                     HAS_TP, TEMPLATE_PARAM, TYPENAME, false)>)     \
+                    && (!std::same_as<                                              \
+                        __ABI_T, __COLT_REF_INSTANT(                                \
+                                     HAS_TP, TEMPLATE_PARAM, TYPENAME, true)>)      \
       explicit STDCOLT_CC(TYPENAME, RefTemplate)(__ABI_T & obj)                     \
           : _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>()) \
           , _object(&obj)                                                           \
@@ -698,17 +567,27 @@ namespace stdcolt::type_erase
           const STDCOLT_CC(TYPENAME, RefTemplate) &) noexcept = default;            \
       STDCOLT_CC(TYPENAME, RefTemplate) & operator=(                                \
           STDCOLT_CC(TYPENAME, RefTemplate) &&) noexcept = default;                 \
-      /* DEFINE METHOD CALLS WITH VTABLE */ STDCOLT_FOR_EACH_1ARG(                  \
+      STDCOLT_FOR_EACH_1ARG(                                                        \
           __COLT_MAKE_METHOD, __COLT_MAKE_METHOD_CONST_REQUIRE,                     \
           FN1 __VA_OPT__(, ) __VA_ARGS__)                                           \
     };                                                                              \
-    template<STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM)>             \
-    using STDCOLT_CC(TYPENAME, Ref) =                                               \
-        STDCOLT_CC(TYPENAME, RefTemplate)<STDCOLT_2D_2(TEMPLATE_PARAM), false>;     \
-    template<STDCOLT_2D_1(TEMPLATE_PARAM) STDCOLT_2D_2(TEMPLATE_PARAM)>             \
-    using STDCOLT_CC(TYPENAME, ConstRef) =                                          \
-        STDCOLT_CC(TYPENAME, RefTemplate)<STDCOLT_2D_2(TEMPLATE_PARAM), true>;      \
-  }
+                                                                                    \
+    __COLT_DECLARE_PRIMARY_ALIAS(HAS_TP, TYPENAME, TEMPLATE_PARAM)                  \
+    __COLT_DECLARE_REF_ALIASES(HAS_TP, TYPENAME, TEMPLATE_PARAM)                    \
+  }                                                                                 \
+  static_assert(true)
+
+#define STDCOLT_TYPE_ERASE_DECLARE_TYPE(                           \
+    NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, FN1, ...)    \
+  __STDCOLT_TYPE_ERASE_DECLARE_MERGED(                             \
+      NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, 0, (_, _), \
+      FN1 __VA_OPT__(, ) __VA_ARGS__)
+
+#define STDCOLT_TYPE_ERASE_DECLARE_TEMPLATE_TYPE(                               \
+    NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, TEMPLATE_PARAM, FN1, ...) \
+  __STDCOLT_TYPE_ERASE_DECLARE_MERGED(                                          \
+      NAMESPACE, CONCEPT_NAME, TYPENAME, CUSTOMIZATION, 1, TEMPLATE_PARAM,      \
+      FN1 __VA_OPT__(, ) __VA_ARGS__)
 
 /// @brief Defines a method for `STDCOLT_TYPE_ERASE_DECLARE_TYPE`
 /// @warning Arguments should be provided as (TYPE, NAME) IN PARENTHESIS
