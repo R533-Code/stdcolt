@@ -274,8 +274,8 @@
       __DETAILS__STDCOLT_FOR_EACH_HELPER_1ARG2(macro, arg, __VA_ARGS__)))
 
 /// @brief If x is wrapped in parenthesis, removes them
-#define __STDCOLT_deparen(x) __STDCOLT_ESC(__STDCOLT_ISH x)
+#define STDCOLT_DEPAREN(x) __STDCOLT_ESC(__STDCOLT_ISH x)
 /// @brief If x is wrapped in parenthesis, does nothing, else adds parenthesis
-#define __STDCOLT_addparen(x) (__STDCOLT_ESC(__STDCOLT_ISH x))
+#define STDCOLT_ADDPAREN(x) (__STDCOLT_ESC(__STDCOLT_ISH x))
 
 #endif // !__HG_STDCOLT_MACROS_FOR_EACH
