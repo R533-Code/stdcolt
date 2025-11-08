@@ -10,3 +10,6 @@
 [submodule "src/contracts/3rd_party/cpptrace"]
 	path = src/contracts/3rd_party/cpptrace
 	url = https://github.com/jeremy-rifkin/cpptrace.git
+[submodule "src/simd/3rd_party/libsimdpp"]
+	path = src/simd/3rd_party/libsimdpp
+	url = https://github.com/p12tic/libsimdpp.git
