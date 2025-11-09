@@ -1,38 +1,20 @@
-function(enable_simd_for TARGET_NAME)
-  if (MSVC)
-    target_compile_options(${TARGET_NAME} PRIVATE
-      /arch:AVX2 # /arch:AVX512
-    )
-  elseif (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    # x86/x86_64: enable wide set of intrinsics
-    target_compile_options(${TARGET_NAME} PRIVATE
-      -mavx2 -mfma -mbmi -mbmi2 -maes -mpclmul -mvaes -mvpclmulqdq
-      -mavx512f -mavx512bw -mavx512dq -mavx512cd -mavx512vl -mavx512vnni)
-  endif()
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
+ec_add_subdirectory("3rd_party/libsimdpp")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/3rd_party/libsimdpp/cmake")
+include(SimdppMultiarch)
 
-  # ARM/AArch64 (GCC/Clang). Only apply on ARM targets.
-  if (CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
-    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-      target_compile_options(${TARGET_NAME} PRIVATE
-        -march=armv8.6-a+simd+crypto+dotprod+i8mm+bf16+sve+sve2)
-    endif()
-  elseif (CMAKE_SYSTEM_PROCESSOR MATCHES "^(armv7|armv8l)$")
-    target_compile_options(${TARGET_NAME} PRIVATE -mfpu=neon -mfloat-abi=hard)
-  endif()
+simdpp_get_compilable_archs(COMPILABLE_ARCHS)
+simdpp_multiarch(STDCOLT_SIMD_OBJS
+    "simd.cpp"
+    ${COMPILABLE_ARCHS}
+)
 
-  # AppleClang on Apple Silicon: NEON is default
-  if (APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$" AND CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
-    # maybe add other features?
-  endif()
-endfunction()
-
-ec_add_library_dynamic(simd)
+ec_add_library_dynamic(simd NO_CONFORMANT_PREPROCESSOR_MSVC)
 ec_get_target(simd _simd)
-enable_simd_for(${_simd})
 
-ec_add_executable(bench_simd ROOT_DIR "benchmarks")
-ec_get_target(bench_simd _bench_simd)
-target_link_libraries(${_bench_simd} PUBLIC nanobench ${_simd})
+target_include_directories(${_simd} PUBLIC "3rd_party/libsimdpp")
+# fix sources of simd target:
+target_sources(${_simd} PRIVATE ${STDCOLT_SIMD_OBJS})
 
 ec_add_tests(test_simd
     TESTING_FRAMEWORK doctest

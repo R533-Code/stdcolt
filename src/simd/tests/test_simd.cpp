@@ -1,27 +1,51 @@
 #include <doctest/doctest.h>
 #include <stdcolt_simd/simd.h>
-#include <cstdint>
 #include <vector>
 #include <random>
 #include <cstring>
-#include <chrono>
+#include <cmath>
+#include <limits>
 
-template<class T>
-static void ref_add(std::size_t n, const T* a, const T* b, T* o)
-{
-  for (std::size_t i = 0; i < n; ++i)
-    o[i] = static_cast<T>(a[i] + b[i]);
-}
+#define ALL_INT_T \
+  uint8_t, uint16_t, uint32_t, uint64_t, int8_t, int16_t, int32_t, int64_t
+#define ALL_FP_T float, double
+#define OVERLOAD_AS_LAMBDA(fn)                        \
+  [](size_t n, const auto* a, const auto* b, auto* o) \
+  {                                                   \
+    using T = std::remove_cvref_t<decltype(*a)>;      \
+    fn<T>(n, a, b, o);                                \
+  }
 
-template<class T>
-static void run_add_case(
-    std::size_t n, int off_a, int off_b, int off_o, std::mt19937& rng)
+#define DEFINE_REF_AND_TEST_FN(name, op)                         \
+  template<class T>                                              \
+  static void name(size_t n, const T* a, const T* b, T* o)       \
+  {                                                              \
+    stdcolt::simd::name(n, a, b, o);                             \
+  }                                                              \
+  template<class T>                                              \
+  static void ref_##name(size_t n, const T* a, const T* b, T* o) \
+  {                                                              \
+    for (size_t i = 0; i < n; ++i)                               \
+      o[i] = static_cast<T>(a[i] op b[i]);                       \
+  }
+
+template<class T, auto Func, auto Ref>
+static void run_binop_case(
+    size_t n, int off_a, int off_b, int off_o, std::mt19937& rng)
 {
-  const std::size_t pad = 64 / sizeof(T) + 16;
+  const size_t pad = 64 / sizeof(T) + 16;
   std::vector<T> A(n + pad), B(n + pad), O(n + pad), R(n + pad);
 
-  // generate random data
-  if constexpr (std::is_signed_v<T>)
+  // random input
+  if constexpr (std::is_floating_point_v<T>)
+  {
+    std::uniform_real_distribution<double> dist(-1000.0, 1000.0);
+    for (auto& x : A)
+      x = static_cast<T>(dist(rng));
+    for (auto& x : B)
+      x = static_cast<T>(dist(rng));
+  }
+  else if constexpr (std::is_signed_v<T>)
   {
     std::uniform_int_distribution<int64_t> dist(
         std::numeric_limits<T>::min(), std::numeric_limits<T>::max());
@@ -45,77 +69,70 @@ static void run_add_case(
   const T* b = B.data() + off_b;
   T* r       = R.data() + off_o;
 
-  ref_add(n, a, b, r);
-  stdcolt::simd::add(n, a, b, o);
+  Ref(n, a, b, r);  // reference
+  Func(n, a, b, o); // SIMD function
 
-  REQUIRE(std::memcmp(r, o, n * sizeof(T)) == 0);
+  if constexpr (std::is_floating_point_v<T>)
+  {
+    const T eps = static_cast<T>(1e-6);
+    for (size_t i = 0; i < n; ++i)
+      CHECK(std::fabs(o[i] - r[i]) <= eps * (std::fabs(r[i]) + 1));
+  }
+  else
+  {
+    REQUIRE(std::memcmp(r, o, n * sizeof(T)) == 0);
+  }
 }
 
-template<class T>
+template<class T, auto Func, auto Ref>
 static void suite_for_type()
 {
   std::mt19937 rng(12345);
+  const size_t sizes[] = {0,  1,  2,  3,   7,   15,  16,  17,   31,   32,  47,
+                          63, 64, 65, 127, 128, 511, 512, 1000, 4000, 8000};
+  const int offs[]     = {0, 1, 2, 4, 8};
 
-  const std::size_t sizes[] = {0,  1,  2,  3,   7,   15,  16,  17,   31,   32,  47,
-                               63, 64, 65, 127, 128, 511, 512, 1000, 4000, 8000};
-
-  const int offs[] = {0, 1, 2, 4, 8};
-  for (std::size_t n : sizes)
-  {
-    // try different combinations:
+  for (size_t n : sizes)
     for (int oa : offs)
-    {
       for (int ob : offs)
-      {
         for (int oo : offs)
-        {
-          run_add_case<T>(n, oa, ob, oo, rng);
-        }
-      }
-    }
-  }
+          run_binop_case<T, Func, Ref>(n, oa, ob, oo, rng);
 }
 
-template<class... Ts>
+template<auto Func, auto Ref, class... Ts>
 void run_all_suites()
 {
-  // no SUBCASE here; just call them
-  (suite_for_type<Ts>(), ...);
+  (suite_for_type<Ts, Func, Ref>(), ...);
 }
 
-TEST_CASE("stdcolt/simd/add")
+DEFINE_REF_AND_TEST_FN(add, +)
+DEFINE_REF_AND_TEST_FN(sub, -)
+DEFINE_REF_AND_TEST_FN(mul, *)
+DEFINE_REF_AND_TEST_FN(div, /)
+
+TEST_CASE("stdcolt/simd")
 {
-  using namespace stdcolt;
-
-  SUBCASE("scalar")
+  SUBCASE("add")
   {
-    // disable all CPU features
-    simd::override_disabled_features(~(simd::FeatureMask)0);
-    simd::rebuild_optimal_overloads();
-    auto start = std::chrono::high_resolution_clock::now();
-
     run_all_suites<
-        std::uint8_t, std::uint16_t, std::uint32_t, std::uint64_t, std::int8_t,
-        std::int16_t, std::int32_t, std::int64_t>();
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> elapsed = end - start;
-    printf("  Scalar Implementation: %f ms\n", elapsed.count());
+        OVERLOAD_AS_LAMBDA(add), OVERLOAD_AS_LAMBDA(ref_add), ALL_INT_T, ALL_FP_T>();
   }
-
-  SUBCASE("simd")
+  SUBCASE("sub")
   {
-    // enable all CPU features
-    simd::override_disabled_features(0);
-    simd::rebuild_optimal_overloads();
-    auto start = std::chrono::high_resolution_clock::now();
-
     run_all_suites<
-        std::uint8_t, std::uint16_t, std::uint32_t, std::uint64_t, std::int8_t,
-        std::int16_t, std::int32_t, std::int64_t>();
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double, std::milli> elapsed = end - start;
-    printf("  SIMD Implementation: %f ms\n", elapsed.count());
+        OVERLOAD_AS_LAMBDA(sub), OVERLOAD_AS_LAMBDA(ref_sub), ALL_INT_T, ALL_FP_T>();
+  }
+  SUBCASE("mul")
+  {
+    run_all_suites<OVERLOAD_AS_LAMBDA(mul), OVERLOAD_AS_LAMBDA(ref_mul), ALL_FP_T>();
+  }
+  SUBCASE("div")
+  {
+    run_all_suites<OVERLOAD_AS_LAMBDA(div), OVERLOAD_AS_LAMBDA(ref_div), ALL_FP_T>();
   }
 }
+
+#undef DEFINE_REF_AND_TEST_FN
+#undef OVERLOAD_AS_LAMBDA
+#undef ALL_INT_T
+#undef ALL_FP_T
