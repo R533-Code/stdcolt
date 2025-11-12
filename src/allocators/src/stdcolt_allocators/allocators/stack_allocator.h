@@ -33,9 +33,12 @@ namespace stdcolt::alloc
     StackAllocator(StackAllocator&&)      = delete;
     StackAllocator(const StackAllocator&) = delete;
 
-    static constexpr bool is_thread_safe      = false;
-    static constexpr bool is_fallible         = true;
-    static constexpr bool is_nothrow_fallible = true;
+    static constexpr AllocatorInfo allocator_info = {
+        .is_thread_safe      = false,
+        .is_fallible         = true,
+        .is_nothrow_fallible = true,
+        .returns_exact_size  = false,
+    };
 
     /// @brief Allocates a block of memory
     /// @param size The size of the block
@@ -94,9 +97,12 @@ namespace stdcolt::alloc
     std::atomic<size_t> _size{0};
 
   public:
-    static constexpr bool is_thread_safe      = true;
-    static constexpr bool is_fallible         = true;
-    static constexpr bool is_nothrow_fallible = true;
+    static constexpr AllocatorInfo allocator_info = {
+        .is_thread_safe      = true,
+        .is_fallible         = true,
+        .is_nothrow_fallible = true,
+        .returns_exact_size  = false,
+    };
 
     /// @brief Allocates a block of memory
     /// @param size The size of the block

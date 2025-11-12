@@ -19,9 +19,12 @@ namespace stdcolt::alloc
   /// This allocator always returns `nullblock`.
   struct NullAllocator
   {
-    static constexpr bool is_thread_safe      = true;
-    static constexpr bool is_fallible         = true;
-    static constexpr bool is_nothrow_fallible = true;
+    static constexpr AllocatorInfo allocator_info = {
+        .is_thread_safe      = true,
+        .is_fallible         = true,
+        .is_nothrow_fallible = true,
+        .returns_exact_size  = true,
+    };
 
     constexpr Block allocate(size_t) const noexcept { return nullblock; }
     constexpr void deallocate(Block blk) const noexcept
@@ -35,9 +38,12 @@ namespace stdcolt::alloc
   /// This allocator always throws `std::bad_alloc`.
   struct NullAllocatorThrow
   {
-    static constexpr bool is_thread_safe      = true;
-    static constexpr bool is_fallible         = true;
-    static constexpr bool is_nothrow_fallible = false;
+    static constexpr AllocatorInfo allocator_info = {
+        .is_thread_safe      = true,
+        .is_fallible         = true,
+        .is_nothrow_fallible = false,
+        .returns_exact_size  = true,
+    };
 
     [[noreturn]]
     Block allocate(size_t) const
@@ -46,7 +52,7 @@ namespace stdcolt::alloc
     }
 
     [[noreturn]]
-    void deallocate(Block) const
+    void deallocate(Block) const noexcept
     {
       // as allocate never returns Block, deallocate must NEVER be called.
       stdcolt::contracts::unreachable();
@@ -57,18 +63,20 @@ namespace stdcolt::alloc
   /// @brief Allocator that always fails by calling `handle_alloc_fail`.
   struct NullAllocatorAbort
   {
-    static constexpr bool is_thread_safe      = true;
-    static constexpr bool is_fallible         = false;
-    static constexpr bool is_nothrow_fallible = false;
+    static constexpr AllocatorInfo allocator_info = {
+        .is_thread_safe     = true,
+        .is_fallible        = false,
+        .returns_exact_size = true,
+    };
 
     [[noreturn]]
-    Block allocate(size_t size) const
+    Block allocate(size_t size) const noexcept
     {
       handle_alloc_fail(size);
     }
 
     [[noreturn]]
-    void deallocate(Block) const
+    void deallocate(Block) const noexcept
     {
       // as allocate never returns Block, deallocate must NEVER be called.
       stdcolt::contracts::unreachable();
