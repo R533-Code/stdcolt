@@ -37,30 +37,48 @@ namespace stdcolt::alloc
     return (n + ALIGN_AS - 1) / ALIGN_AS * ALIGN_AS;
   }
 
+  /// @brief Allocator information
+  struct AllocatorInfo
+  {
+    /// @brief Is the allocator thread safe?
+    /// If it is, any of the allocation methods can be called from any
+    /// threads without risking data races.
+    bool is_thread_safe = false;
+    /// @brief Is the allocator fallible?
+    /// If it is, the `is_nothow_fallible` explains failure handling.
+    /// If it isn't, then the allocator must terminate on failure.
+    bool is_fallible = true;
+    /// @brief Is the allocator nothrow fallible?
+    /// If it is, then nullblock is returned on failure.
+    /// If not, an exception is thrown on failure (`std::bad_alloc`).
+    bool is_nothrow_fallible = false;
+    /// @brief Does the allocator always return an allocation of the exact size requested?
+    /// If not, the Block passed to the allocator in `deallocate` MUST be of the exact same
+    /// size as obtained by `allocate`.
+    bool returns_exact_size = false;
+  };
 
   template<typename T>
   concept IsAllocator = requires(T alloc, size_t bytes, Block block) {
-    // Is the allocator always thread safe?
-    { T::is_thread_safe } -> std::convertible_to<bool>;
-    // Is the allocator fallible?
-    // If it is, the is_nothow_fallible explains failure handling.
-    // If it isn't, then the allocator must terminate on failure.
-    { T::is_fallible } -> std::convertible_to<bool>;
-    // Is the allocator nothrow fallible?
-    // If it is then it must return a nullblock on failure.
-    // If not, it must throw an exception on failure.
-    { T::is_nothrow_fallible } -> std::convertible_to<bool>;
+    { T::allocator_info } -> std::convertible_to<AllocatorInfo>;
 
     // allocates a memory block
     { alloc.allocate(bytes) } -> std::same_as<Block>;
     // deallocates a memory block
-    { alloc.deallocate(block) } -> std::same_as<void>;
+    { alloc.deallocate(block) } noexcept -> std::same_as<void>;
 
-    // vvv small checks to verify correctness
-    requires(noexcept(alloc.allocate(bytes)) == T::is_nothrow_fallible);
-    requires(noexcept(alloc.deallocate(block)) == T::is_nothrow_fallible);
+    // noexcept rules for allocate:
+    //  - not fallible          -> must be noexcept (terminates on failure)
+    //  - fallible & nothrow    -> must be noexcept (returns nullblock)
+    //  - fallible & may throw  -> must NOT be noexcept
+    requires(
+        T::allocator_info.is_fallible ? (noexcept(alloc.allocate(bytes))
+                                         == T::allocator_info.is_nothrow_fallible)
+                                      : noexcept(alloc.allocate(bytes)));
+
     // is_nothrow_fallible implies is_fallible.
-    requires(!T::is_nothrow_fallible || T::is_fallible);
+    requires(
+        !T::allocator_info.is_nothrow_fallible || T::allocator_info.is_fallible);
   };
 
   /// @brief The function to call on allocation failure.
@@ -76,22 +94,23 @@ namespace stdcolt::alloc
   STDCOLT_ALLOCATORS_EXPORT
   alloc_fail_fn_t register_on_alloc_fail(alloc_fail_fn_t fn) noexcept;
 
-  STDCOLT_ALLOCATORS_EXPORT
   [[noreturn]]
-  /// @brief The default function that is called on allocation failure
-  /// @param size The size of the allocation
-  /// @param loc The source location of the allocation
-  void default_on_alloc_fail(size_t size, const std::source_location& loc) noexcept;
+  STDCOLT_ALLOCATORS_EXPORT
+      /// @brief The default function that is called on allocation failure
+      /// @param size The size of the allocation
+      /// @param loc The source location of the allocation
+      void default_on_alloc_fail(
+          size_t size, const std::source_location& loc) noexcept;
 
-  STDCOLT_ALLOCATORS_EXPORT
   [[noreturn]]
-  /// @brief Function that MUST be called when an infallible allocation fails.
-  /// @note Allocators calling this function should avoid holding any locks.
-  /// @param size The size of the allocation
-  /// @param loc The source location
-  void handle_alloc_fail(
-      size_t size,
-      const std::source_location& loc = STDCOLT_CURRENT_SOURCE_LOCATION) noexcept;
+  STDCOLT_ALLOCATORS_EXPORT
+      /// @brief Function that MUST be called when an infallible allocation fails.
+      /// @note Allocators calling this function should avoid holding any locks.
+      /// @param size The size of the allocation
+      /// @param loc The source location
+      void handle_alloc_fail(
+          size_t size, const std::source_location& loc =
+                           STDCOLT_CURRENT_SOURCE_LOCATION) noexcept;
 } // namespace stdcolt::alloc
 
 #endif // !__HG_STDCOLT_ALLOCATORS_ALLOCATOR
