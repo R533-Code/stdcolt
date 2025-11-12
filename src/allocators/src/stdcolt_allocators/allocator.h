@@ -16,6 +16,28 @@
 /// @brief Everything related to memory allocation
 namespace stdcolt::alloc
 {
+  /// @brief Check if an integer is a power of two
+  /// @tparam T The integer type
+  /// @param n The integer
+  /// @return True if power of two
+  template<std::integral T>
+  constexpr bool is_power_of_2(T n) noexcept
+  {
+    return (n & (n - 1)) == 0;
+  }
+
+  /// @brief Aligns a value up to a multiple of another
+  /// @tparam ALIGN_AS The value to align to
+  /// @param n The value to align
+  /// @return Aligned value
+  template<size_t ALIGN_AS>
+  constexpr size_t align_up(size_t n) noexcept
+  {
+    static_assert(ALIGN_AS != 0, "ALIGN_AS must not be zero");
+    return (n + ALIGN_AS - 1) / ALIGN_AS * ALIGN_AS;
+  }
+
+
   template<typename T>
   concept IsAllocator = requires(T alloc, size_t bytes, Block block) {
     // Is the allocator always thread safe?
