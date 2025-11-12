@@ -13,3 +13,6 @@
 [submodule "src/simd/3rd_party/libsimdpp"]
 	path = src/simd/3rd_party/libsimdpp
 	url = https://github.com/p12tic/libsimdpp.git
+[submodule "3rd_party/nanobind"]
+	path = 3rd_party/nanobind
+	url = https://github.com/wjakob/nanobind.git
