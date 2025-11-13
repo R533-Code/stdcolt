@@ -118,6 +118,24 @@ namespace stdcolt::alloc
     requires(T::allocator_info.alignment != 0);
   };
 
+  // TODO: specify behavior on nullblock.
+  /// @brief An owning allocator is an allocator that has a `.owns` method.
+  /// The method returns true if the Block was allocated by the allocator.
+  /// The allocator may return true if that block was allocated then
+  /// deallocated: this is not a check of "active" or not, only a check
+  /// that the allocator may produce such a block.
+  template<typename T>
+  concept IsOwningAllocator =
+      IsAllocator<T> && requires(const T alloc, Block block) {
+        { alloc.owns(block) } noexcept -> std::same_as<bool>;
+      };
+
+  /// @brief Short-hand to obtain the `noexcept` of `allocate` of an allocator
+  /// @tparam ALLOCATOR The allocator to check for
+  template<IsAllocator ALLOCATOR>
+  static constexpr bool is_allocate_nothrow_v =
+      noexcept(std::declval<ALLOCATOR>().allocate(std::declval<Layout>()));
+
   /// @brief The function to call on allocation failure.
   /// The function receives the attempted allocation, and
   /// the source location of the allocation.
