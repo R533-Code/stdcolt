@@ -18,6 +18,9 @@
 /// @brief Everything related to memory allocation
 namespace stdcolt::alloc
 {
+  /// @brief The recommended alignment that allocators should have.
+  /// This value is guaranteed to be >= to the alignment of `std::max_align_t`,
+  /// and is usually aligned enough for SIMD primitives.
   inline constexpr std::size_t PREFERRED_ALIGNMENT =
 #ifdef __STDCPP_DEFAULT_NEW_ALIGNMENT__
       __STDCPP_DEFAULT_NEW_ALIGNMENT__;
