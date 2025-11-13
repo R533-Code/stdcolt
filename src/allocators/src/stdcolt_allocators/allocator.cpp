@@ -21,21 +21,23 @@ namespace stdcolt::alloc
     return ALLOC_FAIL_HOOK.exchange(fn, std::memory_order_relaxed);
   }
 
-  void default_on_alloc_fail(size_t size, const std::source_location& loc) noexcept
+  void default_on_alloc_fail(
+      Layout request, const std::source_location& loc) noexcept
   {
     std::fprintf(
         stderr,
-        "FATAL ERROR: Allocation failure of size %" PRIu64 "\n"
+        "FATAL ERROR: Allocation failure of size %" PRIu64 " and align %" PRIu64 "\n"
         "             from %s:%" PRIu64 "\n"
         "             in function `%s`.",
-        (uint64_t)size, loc.file_name(), (uint64_t)loc.line(), loc.function_name());
+        (uint64_t)request.size(), (uint64_t)request.align(), loc.file_name(),
+        (uint64_t)loc.line(), loc.function_name());
     std::abort();
   }
 
-  void handle_alloc_fail(size_t size, const std::source_location& loc) noexcept
+  void handle_alloc_fail(Layout request, const std::source_location& loc) noexcept
   {
     if (auto fn = ALLOC_FAIL_HOOK.load(std::memory_order_relaxed))
-      fn(size, loc);
+      fn(request, loc);
     std::abort();
   }
 } // namespace stdcolt::alloc
