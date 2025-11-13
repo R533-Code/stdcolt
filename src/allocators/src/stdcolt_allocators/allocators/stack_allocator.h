@@ -9,7 +9,6 @@
 #define __HG_STDCOLT_ALLOCATORS_STACK_ALLOCATOR
 
 #include <stdcolt_allocators/allocator.h>
-#include <cstddef>
 #include <atomic>
 
 namespace stdcolt::alloc
@@ -17,7 +16,7 @@ namespace stdcolt::alloc
   /// @brief Allocator that returns memory from the stack.
   /// @tparam SIZE The size of the buffer (automatically aligned to the alignment)
   /// @tparam ALIGN_AS The alignment of the allocations
-  template<size_t SIZE, size_t ALIGN_AS = alignof(std::max_align_t)>
+  template<size_t SIZE, size_t ALIGN_AS = PREFERRED_ALIGNMENT>
   class StackAllocator
   {
     static_assert(ALIGN_AS != 0, "Alignment may not be zero!");
@@ -38,14 +37,18 @@ namespace stdcolt::alloc
         .is_fallible         = true,
         .is_nothrow_fallible = true,
         .returns_exact_size  = false,
+        .alignment           = ALIGN_AS,
     };
 
     /// @brief Allocates a block of memory
-    /// @param size The size of the block
+    /// @param request The allocation request
     /// @return Block or nullblock on failure
-    constexpr Block allocate(size_t size) noexcept
+    constexpr Block allocate(Layout request) noexcept
     {
-      size = align_up<ALIGN_AS>(size);
+      if (request.align() > ALIGN_AS)
+        return nullblock;
+
+      auto size = align_up<ALIGN_AS>(request.size());
       if (_size + size > BUFFER_SIZE)
         return nullblock;
       Block ret = {_buffer + _size, size};
@@ -86,7 +89,7 @@ namespace stdcolt::alloc
   /// in between, as only the most recently allocated block can be released.
   /// @tparam SIZE The size of the buffer (automatically aligned to the alignment)
   /// @tparam ALIGN_AS The alignment of the allocations
-  template<size_t SIZE, size_t ALIGN_AS = alignof(std::max_align_t)>
+  template<size_t SIZE, size_t ALIGN_AS = PREFERRED_ALIGNMENT>
   class StackAllocatorMT
   {
     static_assert(ALIGN_AS != 0, "Alignment may not be zero!");
@@ -102,15 +105,19 @@ namespace stdcolt::alloc
         .is_fallible         = true,
         .is_nothrow_fallible = true,
         .returns_exact_size  = false,
+        .alignment           = PREFERRED_ALIGNMENT,
     };
 
     /// @brief Allocates a block of memory
-    /// @param size The size of the block
+    /// @param request The allocation request
     /// @return Block or nullblock on failure
-    constexpr Block allocate(size_t size) noexcept
+    constexpr Block allocate(Layout request) noexcept
     {
-      size = align_up<ALIGN_AS>(size);
+      if (request.align() > ALIGN_AS)
+        return nullblock;
 
+      auto size = align_up<ALIGN_AS>(request.size());
+      
       size_t old_size = _size.load(std::memory_order_relaxed);
       for (;;)
       {

@@ -24,9 +24,10 @@ namespace stdcolt::alloc
         .is_fallible         = true,
         .is_nothrow_fallible = true,
         .returns_exact_size  = true,
+        .alignment           = PREFERRED_ALIGNMENT,
     };
 
-    constexpr Block allocate(size_t) const noexcept { return nullblock; }
+    constexpr Block allocate(Layout) const noexcept { return nullblock; }
     constexpr void deallocate(Block blk) const noexcept
     {
       STDCOLT_debug_pre(blk == nullblock, "expected `nullblock`");
@@ -43,10 +44,11 @@ namespace stdcolt::alloc
         .is_fallible         = true,
         .is_nothrow_fallible = false,
         .returns_exact_size  = true,
+        .alignment           = PREFERRED_ALIGNMENT,
     };
 
     [[noreturn]]
-    Block allocate(size_t) const
+    Block allocate(Layout) const
     {
       throw std::bad_alloc{};
     }
@@ -67,12 +69,13 @@ namespace stdcolt::alloc
         .is_thread_safe     = true,
         .is_fallible        = false,
         .returns_exact_size = true,
+        .alignment          = PREFERRED_ALIGNMENT,
     };
 
     [[noreturn]]
-    Block allocate(size_t size) const noexcept
+    Block allocate(Layout request) const noexcept
     {
-      handle_alloc_fail(size);
+      handle_alloc_fail(request);
     }
 
     [[noreturn]]
