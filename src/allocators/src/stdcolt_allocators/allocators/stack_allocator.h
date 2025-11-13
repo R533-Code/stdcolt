@@ -70,7 +70,7 @@ namespace stdcolt::alloc
     /// @brief Check if the stack allocators owns a block
     /// @param blk The memory block
     /// @return True if owned by the stack allocator
-    constexpr bool owns(Block blk) noexcept
+    constexpr bool owns(Block blk) const noexcept
     {
       auto* p = blk.ptr();
       auto s  = blk.size();
@@ -81,7 +81,7 @@ namespace stdcolt::alloc
     /// @warning This is unsafe!
     constexpr void deallocate_all() noexcept { _size = 0; }
   };
-  static_assert(IsAllocator<StackAllocator<8>>);
+  static_assert(IsOwningAllocator<StackAllocator<8>>);
 
   /// @brief Thread safe allocator that returns memory from the stack.
   /// This allocator should rarely be used without a free-list: deallocation
@@ -117,7 +117,7 @@ namespace stdcolt::alloc
         return nullblock;
 
       auto size = align_up<ALIGN_AS>(request.size());
-      
+
       size_t old_size = _size.load(std::memory_order_relaxed);
       for (;;)
       {
@@ -178,7 +178,7 @@ namespace stdcolt::alloc
       _size.store(0, std::memory_order_relaxed);
     }
   };
-  static_assert(IsAllocator<StackAllocatorMT<8>>);
+  static_assert(IsOwningAllocator<StackAllocatorMT<8>>);
 } // namespace stdcolt::alloc
 
 #endif // !__HG_STDCOLT_ALLOCATORS_STACK_ALLOCATOR
