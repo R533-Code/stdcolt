@@ -63,7 +63,7 @@ namespace stdcolt::alloc
       STDCOLT_pre(owns(blk), "received non-owned block");
 
       // we can only free a block if it was the last allocated one
-      if (blk.ptr() + blk.size() == _buffer + _size)
+      if ((char*)blk.ptr() + blk.size() == _buffer + _size)
         _size -= blk.size();
     }
 
@@ -72,7 +72,7 @@ namespace stdcolt::alloc
     /// @return True if owned by the stack allocator
     constexpr bool owns(Block blk) const noexcept
     {
-      auto* p = blk.ptr();
+      auto* p = (char*)blk.ptr();
       auto s  = blk.size();
       return p >= _buffer && p + s <= _buffer + _size;
     }
@@ -138,7 +138,7 @@ namespace stdcolt::alloc
     {
       STDCOLT_pre(owns(blk), "received non-owned block");
 
-      auto* p = blk.ptr();
+      auto* p = (char*)blk.ptr();
       auto s  = blk.size();
 
       const auto offset = static_cast<size_t>(p - _buffer);
@@ -164,7 +164,7 @@ namespace stdcolt::alloc
     /// @return True if owned by the stack allocator
     constexpr bool owns(Block blk) const noexcept
     {
-      auto* p     = blk.ptr();
+      auto* p     = (char*)blk.ptr();
       auto s      = blk.size();
       size_t curr = _size.load(std::memory_order_relaxed);
 
