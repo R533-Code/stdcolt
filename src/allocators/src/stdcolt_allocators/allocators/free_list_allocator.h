@@ -25,6 +25,23 @@ namespace stdcolt::alloc
     {
       /// @brief The number of elements in the free list
       size_t size = 0;
+
+      constexpr FreeListSize() noexcept = default;
+
+      // the free list shouldn't be copyable vvv
+      constexpr FreeListSize(const FreeListSize&) noexcept            = delete;
+      constexpr FreeListSize& operator=(const FreeListSize&) noexcept = delete;
+
+      // the free list should be movable vvv
+      constexpr FreeListSize(FreeListSize&& other) noexcept
+          : size(std::exchange(other.size, 0))
+      {
+      }
+      constexpr FreeListSize& operator=(FreeListSize&& other) noexcept
+      {
+        size = std::exchange(other.size, 0);
+        return *this;
+      }
     };
   } // namespace details
 
@@ -51,7 +68,11 @@ namespace stdcolt::alloc
   /// A value of 0 requires an exact-size match. Larger values allow slightly
   /// oversized blocks from the free list to be reused, reducing calls to the
   /// underlying allocator at the cost of potential internal fragmentation.
-  /// @tparam FIRST_FIT
+  /// @tparam FIRST_FIT Returns the first block that fits the requested allocation.
+  /// This is only used when `TOLERATED_SIZE_DIFFERENCE_PERCENT` is not 0. Rather
+  /// than searching in the complete free list for the best match, the first
+  /// match is returned. This is faster at the cost of potential internal
+  /// fragmentation.
   template<
       IsAllocator ALLOCATOR, size_t MIN_BLOCK, size_t MAX_BLOCK,
       size_t MAX_FREE_LIST                     = (size_t)-1,
@@ -117,6 +138,18 @@ namespace stdcolt::alloc
       }
     }
 
+    inline void clear_free_list() noexcept
+    {
+      while (_free_list != nullptr)
+      {
+        Node* next = _free_list->next;
+        ALLOCATOR::deallocate({static_cast<void*>(_free_list), _free_list->size});
+        _free_list = next;
+      }
+      if constexpr (HAS_MAX_SIZE)
+        FREE_LIST_SIZE::size = 0;
+    }
+
   public:
     static constexpr AllocatorInfo allocator_info = {
         .is_thread_safe      = false,
@@ -125,6 +158,46 @@ namespace stdcolt::alloc
         .returns_exact_size  = FORCE_RETURN_EXACT,
         .alignment           = inherited_alloc_info.alignment,
     };
+
+    FreeListAllocator(const FreeListAllocator&)            = delete;
+    FreeListAllocator& operator=(const FreeListAllocator&) = delete;
+
+    template<typename... Ts>
+    constexpr FreeListAllocator(Ts&&... vals)
+      requires std::is_constructible_v<ALLOCATOR, Ts...>
+        : ALLOCATOR(std::forward<Ts>(vals)...)
+    {
+    }
+
+    constexpr FreeListAllocator(FreeListAllocator&& other) noexcept(
+        std::is_nothrow_move_constructible_v<ALLOCATOR>)
+      requires std::is_move_constructible_v<ALLOCATOR>
+        : ALLOCATOR(std::move(static_cast<ALLOCATOR&>(other)))
+        , FREE_LIST_SIZE(std::move(static_cast<FREE_LIST_SIZE&>(other)))
+        , _free_list(std::exchange(other._free_list, nullptr))
+    {
+    }
+
+    constexpr FreeListAllocator& operator=(FreeListAllocator&& other) noexcept(
+        std::is_nothrow_move_assignable_v<ALLOCATOR>)
+      requires std::is_move_assignable_v<ALLOCATOR>
+    {
+      if (this == &other)
+        return *this;
+      // we need to return the free list to the underlying allocator
+      // to be able to steal the free list of the other.
+      // a swap wouldn't really be safe except when the move assignment
+      // operator of the allocator is also swapping. as we can't
+      // know, play it safe:
+      clear_free_list();
+
+      *static_cast<ALLOCATOR*>(this) = std::move(static_cast<ALLOCATOR&>(other));
+      *static_cast<FREE_LIST_SIZE*>(this) =
+          std::move(static_cast<FREE_LIST_SIZE&>(other));
+      _free_list = std::exchange(other._free_list, nullptr);
+
+      return *this;
+    }
 
     Block allocate(Layout request) noexcept(is_allocate_nothrow_v<ALLOCATOR>)
     {
@@ -207,16 +280,7 @@ namespace stdcolt::alloc
         ALLOCATOR::deallocate(block);
     }
 
-    ~FreeListAllocator() noexcept
-    {
-      // return all the blocks to the underlying allocator
-      while (_free_list != nullptr)
-      {
-        auto next = _free_list->next;
-        ALLOCATOR::deallocate({static_cast<void*>(_free_list), _free_list->size});
-        _free_list = next;
-      }
-    }
+    ~FreeListAllocator() noexcept { clear_free_list(); }
 
     bool owns(Block block) const noexcept
       requires IsOwningAllocator<ALLOCATOR>
