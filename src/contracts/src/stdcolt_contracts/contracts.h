@@ -1,6 +1,8 @@
 /*****************************************************************/ /**
  * @file   contracts.h
  * @brief  Contains macros for assertions, pre/post conditions.
+ * 
+ * @author Raphael Dib Nehme
  * @date   Oct 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_CONTRACTS_CONTRACTS
@@ -26,11 +28,13 @@
 namespace stdcolt::contracts
 {
   [[noreturn]] STDCOLT_CONTRACTS_EXPORT
-  /// @brief Marks a branch as unreachable.
-  /// Failure of upholding unreachability will trigger a contract violation.
-  /// @param loc The source location
-  void unreachable(
-      const std::source_location& loc = STDCOLT_CURRENT_SOURCE_LOCATION) noexcept;
+      /// @brief Marks a branch as unreachable.
+      /// Failure of upholding unreachability will trigger a contract violation.
+      /// @param loc The source location
+      void
+      unreachable(
+          const std::source_location& loc =
+              STDCOLT_CURRENT_SOURCE_LOCATION) noexcept;
 
   /// @brief The contract kind
   enum class Kind : unsigned char
@@ -74,15 +78,16 @@ namespace stdcolt::contracts
       const std::optional<std::source_location>&) noexcept;
 
   [[noreturn]] STDCOLT_CONTRACTS_EXPORT
-  /// @brief The default runtime contract violation handler.
-  /// Prints a stack trace and source code information, then aborts.
-  /// @param expr The expression as a string
-  /// @param explanation The explanation
-  /// @param kind The kind of the violation
-  /// @param loc The source location
-  void default_runtime_violation_handler(
-      const char* expr, const char* explanation, Kind kind,
-      const std::optional<std::source_location>& loc) noexcept;
+      /// @brief The default runtime contract violation handler.
+      /// Prints a stack trace and source code information, then aborts.
+      /// @param expr The expression as a string
+      /// @param explanation The explanation
+      /// @param kind The kind of the violation
+      /// @param loc The source location
+      void
+      default_runtime_violation_handler(
+          const char* expr, const char* explanation, Kind kind,
+          const std::optional<std::source_location>& loc) noexcept;
 
   STDCOLT_CONTRACTS_EXPORT
   /// @brief Calls the default runtime violation handler or a newly registered one.
@@ -100,7 +105,7 @@ namespace stdcolt::contracts
   /// This is the function to call on violation of contracts.
   /// At compile-time (due to C++ limitations), only a compilation error can be
   /// generated (no useful error message).
-  /// At runtime, a stack trace will be printed with source code information.
+  /// At runtime, calls the runtime violation handler.
   /// @param expr The expression as a string
   /// @param explanation The explanation
   /// @param kind The violation kind
@@ -146,41 +151,40 @@ namespace stdcolt::contracts
   /// If `fn` is `nullptr`, this function does nothing.
   /// @param fn The new violation handler
   /// @note This function is thread safe without synchronicity.
-  void register_violation_handler(
-      violation_handler_fn_t* fn) noexcept;
+  void register_violation_handler(violation_handler_fn_t* fn) noexcept;
 } // namespace stdcolt::contracts
 
 /// @brief switch case with no default
-#define switch_no_default(...)        \
-  switch (__VA_ARGS__)                \
-  default:                            \
-    if (true)                         \
-    {                                 \
+#define switch_no_default(...)           \
+  switch (__VA_ARGS__)                   \
+  default:                               \
+    if (true)                            \
+    {                                    \
       stdcolt::contracts::unreachable(); \
-    }                                 \
+    }                                    \
     else
 
 /// @brief Precondition (checks that `cond` evaluates to true)
 #define STDCOLT_pre(cond, explanation)                        \
-  do                                                       \
-  {                                                        \
-    if (!static_cast<bool>(cond))                          \
+  do                                                          \
+  {                                                           \
+    if (!static_cast<bool>(cond))                             \
       stdcolt::contracts::violation_handler(                  \
           #cond, explanation, stdcolt::contracts::Kind::Pre); \
   } while (false)
 /// @brief Postcondition (checks that `cond` evaluates to true)
 #define STDCOLT_post(cond, explanation)                       \
-  do                                                       \
-  {                                                        \
-    if (!static_cast<bool>(cond))                          \
+  do                                                          \
+  {                                                           \
+    if (!static_cast<bool>(cond))                             \
       stdcolt::contracts::violation_handler(                  \
           #cond, explanation, stdcolt::contracts::Kind::Pre); \
   } while (false)
 /// @brief Assertion (checks that `cond` evaluates to true)
 #define STDCOLT_assert(cond, explanation)                     \
-  do                                                       \
-  {                                                        \
-    if (!static_cast<bool>(cond))                          \
+  do                                                          \
+  {                                                           \
+    if (!static_cast<bool>(cond))                             \
       stdcolt::contracts::violation_handler(                  \
           #cond, explanation, stdcolt::contracts::Kind::Pre); \
   } while (false)
@@ -195,19 +199,19 @@ namespace stdcolt::contracts
 #else
   /// @brief Precondition that is only evaluated on Debug config
   #define STDCOLT_debug_pre(cond, explanation) \
-    do                                      \
-    {                                       \
-    } while (false);
-  /// @brief Postcondition that is only evaluated on Debug config
-  #define STDCOLT_debug_post(cond, explanation) \
-    do                                       \
-    {                                        \
-    } while (false);
-  /// @brief Assertion that is only evaluated on Debug config
-  #define STDCOLT_debug_assert(cond, explanation) \
     do                                         \
     {                                          \
-    } while (false);
+    } while (false)
+  /// @brief Postcondition that is only evaluated on Debug config
+  #define STDCOLT_debug_post(cond, explanation) \
+    do                                          \
+    {                                           \
+    } while (false)
+  /// @brief Assertion that is only evaluated on Debug config
+  #define STDCOLT_debug_assert(cond, explanation) \
+    do                                            \
+    {                                             \
+    } while (false)
 #endif // STDCOLT_DEBUG
 
 #endif // !__HG_STDCOLT_CONTRACTS_CONTRACTS

@@ -1,6 +1,8 @@
 /*****************************************************************/ /**
  * @file   contracts.cpp
  * @brief  Implementation of `constracts.h`
+ * 
+ * @author Raphael Dib Nehme
  * @date   Oct 2025
  *********************************************************************/
 #include <atomic>
