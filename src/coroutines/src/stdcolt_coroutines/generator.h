@@ -1,3 +1,10 @@
+/*****************************************************************/ /**
+ * @file   generator.h
+ * @brief  Contains `Generator<T>` and useful basic generators.
+ * 
+ * @author Raphael Dib Nehme
+ * @date   November 2025
+ *********************************************************************/
 #ifndef __HG_STDCOLT_COROUTINES_GENERATOR
 #define __HG_STDCOLT_COROUTINES_GENERATOR
 
@@ -303,7 +310,7 @@ namespace stdcolt::coroutines
   /// @tparam T The generated type
   /// @param gen The generator
   /// @param start The starting index
-  /// @return 
+  /// @return
   template<typename T>
   Generator<std::pair<size_t, T>> enumerate(Generator<T> gen, size_t start = 0)
   {
