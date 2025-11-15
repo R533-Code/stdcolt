@@ -11,7 +11,7 @@
 #include <coroutine>
 #include <atomic>
 #include <cstdint>
-#include <cassert>
+#include <stdcolt_contracts/contracts.h>
 
 namespace stdcolt::coroutines
 {
@@ -29,6 +29,24 @@ namespace stdcolt::coroutines
     std::atomic<uintptr_t> _state = 0;
 
   public:
+    /// @brief Construct the flag.
+    /// @param initially_set If true, the flag starts in the set state.
+    explicit FlagSPSC(bool initially_set = false) noexcept
+        : _state(initially_set ? uintptr_t{1} : uintptr_t{0})
+    {
+    }
+    /// @brief Destructor
+    ~FlagSPSC() noexcept
+    {
+      STDCOLT_debug_pre(
+          _state.load(std::memory_order_relaxed) <= 1,
+          "flag must not be destroyed if there is a waiter");
+    }
+    FlagSPSC(FlagSPSC&&)                 = delete;
+    FlagSPSC(const FlagSPSC&)            = delete;
+    FlagSPSC& operator=(FlagSPSC&&)      = delete;
+    FlagSPSC& operator=(const FlagSPSC&) = delete;
+
     /// @brief Check if the flag is set.
     /// @return True if the flag is set.
     bool is_set() const noexcept
@@ -131,6 +149,24 @@ namespace stdcolt::coroutines
     }
 
   public:
+    /// @brief Construct the flag.
+    /// @param initially_set If true, the flag starts in the set state.
+    explicit FlagMPMC(bool initially_set = false) noexcept
+        : _state(make_state(nullptr, initially_set))
+    {
+    }
+    /// @brief Destructor
+    ~FlagMPMC()
+    {
+      STDCOLT_debug_pre(
+          head_from_state(_state.load(std::memory_order_relaxed)) == nullptr,
+          "flag must not be destroyed if there is a waiter");
+    }
+    FlagMPMC(FlagMPMC&&)                 = delete;
+    FlagMPMC(const FlagMPMC&)            = delete;
+    FlagMPMC& operator=(FlagMPMC&&)      = delete;
+    FlagMPMC& operator=(const FlagMPMC&) = delete;
+
     /// @brief Check if the flag is set.
     /// @return True if the flag is set.
     bool is_set() const noexcept
@@ -147,6 +183,8 @@ namespace stdcolt::coroutines
       {
         uintptr_t s  = _state.load(std::memory_order_relaxed);
         Waiter* head = head_from_state(s);
+        if (is_set_state(s) && head == nullptr)
+          return;
 
         // we want to transition to set == true, no waiters.
         uintptr_t desired = make_state(nullptr, true);
