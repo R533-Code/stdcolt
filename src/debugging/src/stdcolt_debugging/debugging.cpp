@@ -1,6 +1,8 @@
 /*****************************************************************/ /**
  * @file   debugging.cpp
  * @brief  Contains the implementation of `debugging.h`.
+ * 
+ * @author Raphael Dib Nehme
  * @date   October 2025
  *********************************************************************/
 #include "debugging.h"

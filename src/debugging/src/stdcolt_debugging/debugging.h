@@ -1,6 +1,8 @@
 /*****************************************************************/ /**
  * @file   debugging.h
  * @brief  Contains programmatic debugging utilities.
+ * 
+ * @author Raphael Dib Nehme
  * @date   October 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_DEBUGGING_DEBUGGING
@@ -20,7 +22,7 @@ namespace stdcolt
   bool is_debugger_present() noexcept;
 
   /// @brief Pass control to the debugger only if running under one
-  void breakpoint_if_debugging() noexcept
+  inline void breakpoint_if_debugging() noexcept
   {
     if (is_debugger_present())
       breakpoint();
