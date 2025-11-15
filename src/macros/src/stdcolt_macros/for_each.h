@@ -1,3 +1,10 @@
+/*****************************************************************/ /**
+ * @file   for_each.h
+ * @brief  Contains `STDCOLT_FOR_EACH_*` macros.
+ * 
+ * @author Raphael Dib Nehme
+ * @date   November 2025
+ *********************************************************************/
 #ifndef __HG_STDCOLT_MACROS_FOR_EACH
 #define __HG_STDCOLT_MACROS_FOR_EACH
 

@@ -1,9 +1,12 @@
+/*****************************************************************/ /**
+ * @file   tuple.h
+ * @brief  Contains `STDCOLT_*D_*` tuple macros.
+ * 
+ * @author Raphael Dib Nehme
+ * @date   November 2025
+ *********************************************************************/
 #ifndef __HG_STDCOLT_MACROS_TUPLE
 #define __HG_STDCOLT_MACROS_TUPLE
-
-///////////////////////////////////////////////////
-// __STDCOLT_*D_* (for tuples)
-///////////////////////////////////////////////////
 
 /// @brief Extract the first value of a 2D tuple (use STDCOLT_2D_1!!)
 #define __STDCOLT_2D_1(X, Y) X

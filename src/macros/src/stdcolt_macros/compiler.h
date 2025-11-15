@@ -1,6 +1,8 @@
 /*****************************************************************/ /**
  * @file   compiler.h
  * @brief  Contains macros to abstract compiler differences.
+ * 
+ * @author Raphael Dib Nehme
  * @date   October 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_MACROS_COMPILER
