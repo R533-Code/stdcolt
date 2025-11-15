@@ -1,0 +1,14 @@
+OUTPUT_DIRECTORY = @CMAKE_SOURCE_DIR@/docs/
+INPUT            = @CMAKE_SOURCE_DIR@/src/
+EXCLUDE_PATTERNS = */3rd_party/* */tests/*
+RECURSIVE        = YES
+CREATE_SUBDIRS   = YES
+
+PROJECT_NUMBER = @PROJECT_VERSION@
+PROJECT_NAME   = stdcolt
+PROJECT_BRIEF  = A C++ library to complement the standard library.
+
+HTML_COLORSTYLE_GAMMA = 150
+
+MARKDOWN_SUPPORT = YES
+# USE_MDFILE_AS_MAINPAGE = @CMAKE_SOURCE_DIR@/resources/doxygen/main.md
