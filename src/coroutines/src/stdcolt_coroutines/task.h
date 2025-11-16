@@ -35,7 +35,8 @@ namespace stdcolt::coroutines
         std::coroutine_handle<> await_suspend(
             std::coroutine_handle<PROMISE> handle) noexcept
         {
-          return handle.promise()._continuation;
+          auto ret = handle.promise()._continuation;
+          return ret ? ret : std::noop_coroutine();
         }
 
         void await_resume() noexcept {}
@@ -278,6 +279,27 @@ namespace stdcolt::coroutines
         void await_resume() const noexcept {}
       };
       return awaitable{handle};
+    }
+
+    auto get_handle() const noexcept { return handle; }
+    auto steal_handle() noexcept { return std::exchange(handle, nullptr); }
+
+    decltype(auto) result() &
+    {
+      STDCOLT_pre(is_ready(), "Task not ready yet");
+      if constexpr (std::is_void_v<T>)
+        handle.promise().result();
+      else
+        return (handle.promise().result());
+    }
+
+    decltype(auto) result() &&
+    {
+      STDCOLT_pre(is_ready(), "Task not ready yet");
+      if constexpr (std::is_void_v<T>)
+        (std::move(handle.promise()).result());
+      else
+        return (std::move(handle.promise()).result());
     }
   };
 
