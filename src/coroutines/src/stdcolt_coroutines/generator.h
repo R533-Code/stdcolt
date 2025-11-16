@@ -28,50 +28,136 @@ namespace stdcolt::coroutines
     static_assert(!std::is_reference_v<T>, "Generator<T&> is not supported");
 
     struct promise_type;
+    /// @brief Short-hand for the coroutine handle type
     using handle_type = std::coroutine_handle<promise_type>;
 
+    /// @brief Promise type, needed for coroutines
     struct promise_type
     {
-      std::optional<T> value;
-      std::exception_ptr exception{};
+      /// @brief The state of the storage
+      enum class StorageState : uint8_t
+      {
+        /// @brief Nothing
+        EMPTY,
+        /// @brief Value
+        VALUE,
+        /// @brief Exception pointer
+        EXCEPT,
+      };
 
+      /// @brief Storage suitable for storing the produced value or the exception
+      alignas(std::max(alignof(T), alignof(std::exception_ptr))) char storage
+          [std::max(sizeof(T), sizeof(std::exception_ptr))];
+      /// @brief The state of the storage
+      StorageState state;
+
+      /// @brief Creates the generator
+      /// @return Generator
       Generator get_return_object()
       {
         return Generator(handle_type::from_promise(*this));
       }
 
+      /// @brief Start the coroutine in a suspended state
       std::suspend_always initial_suspend() const noexcept { return {}; }
+      /// @brief End the coroutine in a suspended state
       std::suspend_always final_suspend() const noexcept { return {}; }
 
-      void unhandled_exception() noexcept { exception = std::current_exception(); }
+      /// @brief If an exception leaks out of the coroutine, save it.
+      void unhandled_exception() noexcept
+      {
+        auto exception = std::current_exception();
+        if (state == StorageState::VALUE)
+        {
+          try
+          {
+            ((T*)storage)->~T();
+          }
+          catch (...)
+          {
+            // if the destructor of the last produced value throws,
+            // then terminate (two exceptions at the same time...)
+            std::terminate();
+          }
+        }
+        new (storage) std::exception_ptr(exception);
+        state = StorageState::EXCEPT;
+      }
 
+      /// @brief Yields a value, and suspend the coroutine.
+      /// @tparam From The yielded value's type
+      /// @param from The yielded value
       template<std::convertible_to<T> From>
       std::suspend_always yield_value(From&& from)
       {
-        value.emplace(std::forward<From>(from));
+        if (state == StorageState::EXCEPT)
+        {
+          // guard against double destructor in `unhandled_exception`
+          state = StorageState::EMPTY;
+          ((std::exception_ptr*)storage)->~exception_ptr();
+        }
+        else if (state == StorageState::VALUE)
+        {
+          // guard against double destructor in `unhandled_exception`
+          state = StorageState::EMPTY;
+          ((T*)storage)->~T();
+        }
+        new (storage) T(std::forward<From>(from));
+        state = StorageState::VALUE;
         return {};
       }
 
+      /// @brief Does nothing
       void return_void() const noexcept {}
+
+      /// @brief Destroys the promise, calling the destructor of the
+      /// stored value. Any exception is swallowed silently.
+      ~promise_type() noexcept
+      {
+        try
+        {
+          if (state == StorageState::EXCEPT)
+          {
+            // guard against double destructor in `unhandled_exception`
+            state = StorageState::EMPTY;
+            ((std::exception_ptr*)storage)->~exception_ptr();
+          }
+          else if (state == StorageState::VALUE)
+          {
+            // guard against double destructor in `unhandled_exception`
+            state = StorageState::EMPTY;
+            ((T*)storage)->~T();
+          }
+        }
+        catch (...)
+        {
+          // swallow any exception
+        }
+      }
     };
 
+    /// @brief Creates a generator from a coroutine handle
+    /// @param h The handle
     Generator(handle_type h) noexcept
         : handle(h)
     {
     }
-
+    /// @brief Destructor, destroys the coroutine
     ~Generator() noexcept
     {
       if (handle)
         handle.destroy();
     }
-
+    /// @brief Move constructor
+    /// @param other The generator whose handle to steal
     Generator(Generator&& other) noexcept
         : handle(std::exchange(other.handle, handle_type{}))
         , full(std::exchange(other.full, false))
     {
     }
-
+    /// @brief Move assignment operator
+    /// @param other The generator whose handle to steal
+    /// @return This
     Generator& operator=(Generator&& other) noexcept
     {
       if (this == &other)
@@ -86,36 +172,25 @@ namespace stdcolt::coroutines
     Generator(const Generator&)            = delete;
     Generator& operator=(const Generator&) = delete;
 
-    using value_type = std::remove_reference_t<T>;
-
-    explicit operator bool()
-    {
-      fill();
-      return full;
-    }
-
-    T operator()()
-    {
-      fill();
-      STDCOLT_assert(full, "Generator exhausted");
-      full          = false;
-      auto& promise = handle.promise();
-      T result      = std::move(*promise.value);
-      promise.value.reset();
-      return result;
-    }
-
+    /// @brief Iterator adaptor for the generator
     class iterator
     {
     public:
-      using value_type        = std::remove_reference_t<T>;
-      using difference_type   = std::ptrdiff_t;
+      /// @brief Value produced by the iterator
+      using value_type = std::remove_reference_t<T>;
+      /// @brief Difference type
+      using difference_type = std::ptrdiff_t;
+      /// @brief Input iterator
       using iterator_category = std::input_iterator_tag;
-      using reference         = T;
-      using pointer           = value_type*;
+      /// @brief Reference type
+      using reference = T;
+      /// @brief Pointer type
+      using pointer = value_type*;
 
+      /// @brief Default constructor
       iterator() = default;
-
+      /// @brief Constructs an iterator from a generator
+      /// @param g The generator
       explicit iterator(Generator* g)
           : gen(g)
       {
@@ -127,8 +202,15 @@ namespace stdcolt::coroutines
         }
       }
 
-      value_type operator*() const { return *gen->handle.promise().value; }
+      /// @brief Returns the produced value
+      /// @return Produced value
+      value_type operator*() const
+      {
+        return std::move(*(T*)gen->handle.promise().storage);
+      }
 
+      /// @brief Increments the iterator
+      /// @return This
       iterator& operator++()
       {
         gen->full = false;
@@ -138,14 +220,18 @@ namespace stdcolt::coroutines
         return *this;
       }
 
-      void operator++(int) { ++(*this); }
-
+      /// @brief Comparison operator to check for `end` condition.
+      /// @return True if the iterator is at the end of the generator
       bool operator==(std::default_sentinel_t) const { return gen == nullptr; }
 
     private:
+      /// @brief The generator
       Generator* gen = nullptr;
     };
 
+    /// @brief Returns the next value or nullopt if there are no more.
+    /// This method may throw an unhandled exception from the coroutine.
+    /// @return
     std::optional<T> next()
     {
       fill();
@@ -159,13 +245,40 @@ namespace stdcolt::coroutines
       return result;
     }
 
+    /// @brief Check if the generator has a value to produce
+    /// This method may throw an unhandled exception from the coroutine.
+    explicit operator bool()
+    {
+      fill();
+      return full;
+    }
+
+    /// @brief Returns the value produced by the generator
+    /// This method may throw an unhandled exception from the coroutine.
+    /// @return The value produced by the generator
+    /// @pre operator bool must return true!
+    T operator()()
+    {
+      fill();
+      STDCOLT_assert(full, "Generator exhausted");
+      full          = false;
+      auto& promise = handle.promise();
+      return std::move(*(T*)promise.storage);
+    }
+
+    /// @brief Returns an iterator over the generator
+    /// @return Iterator over the generator
     iterator begin() { return iterator(this); }
+    /// @brief end iterator
     std::default_sentinel_t end() const { return {}; }
 
   private:
+    /// @brief The coroutine handle
     handle_type handle{};
+    /// @brief If true then a value was already produced.
     bool full = false;
 
+    /// @brief Generates the next value if not full.
     void fill()
     {
       if (!handle || full)
@@ -174,11 +287,10 @@ namespace stdcolt::coroutines
         return;
 
       handle.resume();
-      auto& promise = handle.promise();
-      if (promise.exception)
+      if (auto& promise = handle.promise();
+          promise.state == promise_type::StorageState::EXCEPT)
       {
-        auto ex           = std::move(promise.exception);
-        promise.exception = {};
+        auto ex = *(std::exception_ptr*)promise.storage;
         std::rethrow_exception(ex);
       }
       full = !handle.done();
