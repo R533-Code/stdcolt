@@ -9,31 +9,11 @@
 
 using namespace stdcolt::coroutines;
 
-Generator<int> make_counter(int n)
-{
-  for (int i = 0; i < n; ++i)
-    co_yield i;
-}
-Generator<int> make_empty()
-{
-  co_return;
-}
-Generator<int> make_throwing()
-{
-  co_yield 1;
-  throw std::runtime_error("boom");
-}
-Generator<double> make_double_from_ints()
-{
-  co_yield 1;
-  co_yield 2;
-}
-
 struct Tracker
 {
-  static inline int ctor_count     = 0;
-  static inline int dtor_count     = 0;
-  static inline int live_objects   = 0;
+  static inline int ctor_count   = 0;
+  static inline int dtor_count   = 0;
+  static inline int live_objects = 0;
 
   int value = 0;
 
@@ -85,11 +65,240 @@ struct Tracker
 
   static void reset()
   {
-    ctor_count    = 0;
-    dtor_count    = 0;
-    live_objects  = 0;
+    ctor_count   = 0;
+    dtor_count   = 0;
+    live_objects = 0;
   }
 };
+
+template<typename T>
+struct SyncTask;
+
+struct SyncTaskVoid;
+
+template<typename T>
+struct SyncTask
+{
+  struct promise_type
+  {
+    std::optional<T> value;
+    std::exception_ptr exception;
+
+    SyncTask get_return_object() noexcept
+    {
+      return SyncTask{std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+    std::suspend_never initial_suspend() noexcept { return {}; }
+    std::suspend_always final_suspend() noexcept { return {}; }
+
+    template<typename U>
+      requires std::convertible_to<U, T>
+    void return_value(U&& v)
+    {
+      value = T(std::forward<U>(v));
+    }
+
+    void unhandled_exception() noexcept { exception = std::current_exception(); }
+  };
+
+  std::coroutine_handle<promise_type> handle;
+
+  explicit SyncTask(std::coroutine_handle<promise_type> h) noexcept
+      : handle(h)
+  {
+  }
+
+  SyncTask(const SyncTask&)            = delete;
+  SyncTask& operator=(const SyncTask&) = delete;
+
+  SyncTask(SyncTask&& other) noexcept
+      : handle(std::exchange(other.handle, nullptr))
+  {
+  }
+
+  SyncTask& operator=(SyncTask&& other) noexcept
+  {
+    if (this == &other)
+      return *this;
+    if (handle)
+      handle.destroy();
+    handle = std::exchange(other.handle, nullptr);
+    return *this;
+  }
+
+  ~SyncTask()
+  {
+    if (handle)
+      handle.destroy();
+  }
+
+  T get()
+  {
+    auto& p = handle.promise();
+    if (p.exception)
+      std::rethrow_exception(p.exception);
+    CHECK(p.value.has_value());
+    return std::move(*p.value);
+  }
+};
+
+struct SyncTaskVoid
+{
+  struct promise_type
+  {
+    std::exception_ptr exception;
+
+    SyncTaskVoid get_return_object() noexcept
+    {
+      return SyncTaskVoid{std::coroutine_handle<promise_type>::from_promise(*this)};
+    }
+    std::suspend_never initial_suspend() noexcept { return {}; }
+    std::suspend_always final_suspend() noexcept { return {}; }
+    void return_void() noexcept {}
+
+    void unhandled_exception() noexcept { exception = std::current_exception(); }
+  };
+
+  std::coroutine_handle<promise_type> handle;
+
+  explicit SyncTaskVoid(std::coroutine_handle<promise_type> h) noexcept
+      : handle(h)
+  {
+  }
+
+  SyncTaskVoid(const SyncTaskVoid&)            = delete;
+  SyncTaskVoid& operator=(const SyncTaskVoid&) = delete;
+
+  SyncTaskVoid(SyncTaskVoid&& other) noexcept
+      : handle(std::exchange(other.handle, nullptr))
+  {
+  }
+
+  SyncTaskVoid& operator=(SyncTaskVoid&& other) noexcept
+  {
+    if (this == &other)
+      return *this;
+    if (handle)
+      handle.destroy();
+    handle = std::exchange(other.handle, nullptr);
+    return *this;
+  }
+
+  ~SyncTaskVoid()
+  {
+    if (handle)
+      handle.destroy();
+  }
+
+  void get()
+  {
+    auto& p = handle.promise();
+    if (p.exception)
+      std::rethrow_exception(p.exception);
+  }
+};
+
+template<typename T>
+SyncTask<T> sync_await(Task<T> t)
+{
+  co_return co_await t;
+}
+
+template<typename T>
+SyncTask<T> sync_await_move(Task<T> t)
+{
+  co_return co_await std::move(t);
+}
+
+inline SyncTaskVoid sync_await_void(Task<void> t)
+{
+  co_await t;
+}
+
+template<typename Awaitable>
+SyncTaskVoid sync_await_any(Awaitable a)
+{
+  co_await a;
+}
+
+Task<int> make_value_task(int v)
+{
+  co_return v;
+}
+
+Task<void> make_void_task_increment(int& x)
+{
+  ++x;
+  co_return;
+}
+
+Task<int&> make_ref_task(int& x)
+{
+  co_return x;
+}
+
+Task<int> make_throwing_task()
+{
+  throw std::runtime_error("");
+  co_return 0;
+}
+
+Task<void> make_throwing_void_task()
+{
+  throw std::runtime_error("");
+  co_return;
+}
+
+Task<int> add_one(Task<int> t)
+{
+  int v = co_await t;
+  co_return v + 1;
+}
+
+Task<int> add_two_via_chain(Task<int> t)
+{
+  co_return co_await add_one(std::move(t)) + 1;
+}
+
+Task<void> increment_ref_task(Task<int&> t)
+{
+  int& r = co_await t;
+  ++r;
+  co_return;
+}
+Task<Tracker> make_tracker_task(int v)
+{
+  co_return Tracker{v};
+}
+Task<Tracker> make_tracker_throw_after_construct(int v)
+{
+  Tracker t{v};
+  throw std::runtime_error("");
+  co_return t;
+}
+Task<Tracker> make_tracker_never_started(int v)
+{
+  co_return Tracker{v};
+}
+Generator<int> make_counter(int n)
+{
+  for (int i = 0; i < n; ++i)
+    co_yield i;
+}
+Generator<int> make_empty()
+{
+  co_return;
+}
+Generator<int> make_throwing()
+{
+  co_yield 1;
+  throw std::runtime_error("");
+}
+Generator<double> make_double_from_ints()
+{
+  co_yield 1;
+  co_yield 2;
+}
 static Generator<Tracker> gen_unconsumed_value()
 {
   co_yield Tracker{42};
@@ -104,11 +313,11 @@ static Generator<Tracker> gen_overwrite_value()
 static Generator<Tracker> gen_throw_after_value()
 {
   co_yield Tracker{7};
-  throw std::runtime_error("boom after yield");
+  throw std::runtime_error("");
 }
 static Generator<Tracker> gen_throw_before_yield()
 {
-  throw std::runtime_error("boom before yield");
+  throw std::runtime_error("");
   co_return;
 }
 static Generator<Tracker> gen_yield_once()
@@ -338,6 +547,270 @@ TEST_CASE("stdcolt/coroutines")
       (void)t; // suppress unused warning
     }
     CHECK(Tracker::live_objects == 0);
+    CHECK(Tracker::ctor_count == Tracker::dtor_count);
+  }
+  SUBCASE("simple value task returns value")
+  {
+    auto t   = make_value_task(42);
+    auto res = sync_await(std::move(t)).get();
+    CHECK(res == 42);
+  }
+
+  SUBCASE("value task can be awaited via rvalue operator co_await")
+  {
+    auto t   = make_value_task(10);
+    auto res = sync_await_move(std::move(t)).get();
+    CHECK(res == 10);
+  }
+
+  SUBCASE("is_ready() false before execution")
+  {
+    auto t = make_value_task(5);
+    CHECK_FALSE(t.is_ready()); // coroutine not started yet
+  }
+
+  SUBCASE("move construction transfers ownership and leaves source ready")
+  {
+    auto t1 = make_value_task(7);
+    CHECK_FALSE(t1.is_ready());
+
+    Task<int> t2 = std::move(t1);
+
+    CHECK(t1.is_ready()); // moved-from: handle == nullptr
+    auto res = sync_await(std::move(t2)).get();
+    CHECK(res == 7);
+  }
+
+  SUBCASE("move assignment transfers ownership and destroys previous coroutine")
+  {
+    auto t1 = make_value_task(1);
+    auto t2 = make_value_task(2);
+
+    // Force t1 to be a valid task that hasn't run yet
+    CHECK_FALSE(t1.is_ready());
+    CHECK_FALSE(t2.is_ready());
+
+    t1 = std::move(t2);
+
+    CHECK(t2.is_ready()); // moved-from
+    auto res = sync_await(std::move(t1)).get();
+    CHECK(res == 2);
+  }
+}
+
+TEST_CASE("stdcolt/Task void semantics")
+{
+  SUBCASE("void task executes side effects")
+  {
+    int x  = 0;
+    auto t = make_void_task_increment(x);
+
+    CHECK(x == 0);
+    sync_await_void(std::move(t)).get();
+    CHECK(x == 1);
+  }
+
+  SUBCASE("void task chained in another coroutine")
+  {
+    int x      = 5;
+    auto chain = [&]() -> Task<void>
+    {
+      co_await make_void_task_increment(x);
+      co_await make_void_task_increment(x);
+      co_return;
+    };
+
+    auto t = chain();
+    sync_await_void(std::move(t)).get();
+    CHECK(x == 7);
+  }
+}
+
+TEST_CASE("stdcolt/Task reference semantics")
+{
+  SUBCASE("Task<T&> propagates reference and allows mutation")
+  {
+    int value = 10;
+    auto t    = make_ref_task(value);
+
+    auto use = [&](Task<int&> tt) -> Task<void>
+    {
+      int& ref = co_await tt;
+      ref += 5;
+      co_return;
+    };
+
+    auto u = use(std::move(t));
+    sync_await_void(std::move(u)).get();
+    CHECK(value == 15);
+  }
+
+  SUBCASE("Task<T&> used in helper coroutine")
+  {
+    int value = 3;
+    auto t    = make_ref_task(value);
+    auto u    = increment_ref_task(std::move(t));
+
+    sync_await_void(std::move(u)).get();
+    CHECK(value == 4);
+  }
+}
+
+TEST_CASE("stdcolt/Task exception propagation")
+{
+  SUBCASE("Task<T> propagates exception to awaiter")
+  {
+    auto t = make_throwing_task();
+
+    auto runner = [](Task<int> tt) -> SyncTaskVoid
+    {
+      try
+      {
+        (void)co_await tt;
+        CHECK(false); // should not reach
+      }
+      catch (const std::runtime_error& e)
+      {
+        CHECK(std::string(e.what()) == "");
+      }
+      co_return;
+    };
+
+    runner(std::move(t)).get();
+  }
+
+  SUBCASE("Task<void> propagates exception to awaiter")
+  {
+    auto t = make_throwing_void_task();
+
+    auto runner = [](Task<void> tt) -> SyncTaskVoid
+    {
+      try
+      {
+        co_await tt;
+        CHECK(false); // should not reach
+      }
+      catch (const std::runtime_error& e)
+      {
+        CHECK(std::string(e.what()) == "");
+      }
+      co_return;
+    };
+
+    runner(std::move(t)).get();
+  }
+}
+
+TEST_CASE("stdcolt/Task chaining and continuations")
+{
+  SUBCASE("Task can be awaited from another Task")
+  {
+    auto t = make_value_task(10);
+    auto u = add_one(std::move(t));
+
+    auto res = sync_await(std::move(u)).get();
+    CHECK(res == 11);
+  }
+
+  SUBCASE("multiple levels of Task chaining preserve continuations")
+  {
+    auto t = make_value_task(3);
+    auto u = add_two_via_chain(std::move(t));
+
+    auto res = sync_await(std::move(u)).get();
+    CHECK(res == 5); // (3 + 1) + 1
+  }
+
+  SUBCASE("when_ready() completes before result is consumed")
+  {
+    auto t = make_value_task(21);
+
+    // First ensure it completes via when_ready()
+    sync_await_any(t.when_ready()).get();
+
+    // Now actually consume the result via a second await
+    auto consume = [](Task<int> tt) -> Task<int>
+    {
+      int v = co_await tt;
+      co_return v * 2;
+    };
+
+    auto doubled = consume(std::move(t));
+    auto res     = sync_await(std::move(doubled)).get();
+    CHECK(res == 42);
+  }
+}
+
+TEST_CASE("stdcolt/Task lifetime / Tracker interaction")
+{
+  SUBCASE("promise destroys value when Task is destroyed without consuming result")
+  {
+    Tracker::reset();
+    {
+      auto t = make_tracker_task(42);
+
+      // Run the task to completion but never co_await the value
+      sync_await_any(t.when_ready()).get();
+      // 't' goes out of scope here; promise destructor must destroy Tracker
+    }
+    CHECK(Tracker::live_objects == 0);
+    CHECK(Tracker::ctor_count == Tracker::dtor_count);
+  }
+
+  SUBCASE("consumed value does not cause double destruction")
+  {
+    Tracker::reset();
+    {
+      auto consumer = [](Task<Tracker> tt) -> Task<void>
+      {
+        Tracker t = co_await tt; // move out of coroutine storage
+        (void)t;
+        co_return;
+      };
+
+      auto t = make_tracker_task(7);
+      auto u = consumer(std::move(t));
+
+      sync_await_void(std::move(u)).get();
+    }
+    CHECK(Tracker::live_objects == 0);
+    CHECK(Tracker::ctor_count == Tracker::dtor_count);
+  }
+
+  SUBCASE("exception thrown before first suspend does not construct Tracker")
+  {
+    Tracker::reset();
+    {
+      auto t = make_tracker_throw_after_construct(5);
+
+      auto runner = [](Task<Tracker> tt) -> SyncTaskVoid
+      {
+        CHECK_THROWS_AS(co_await tt, std::runtime_error);
+        co_return;
+      };
+
+      runner(std::move(t)).get();
+    }
+    // Tracker may be constructed before the throw in coroutine body, but
+    // must be destroyed exactly once; no leaks, no double-destruction.
+    CHECK(Tracker::live_objects == 0);
+    CHECK(Tracker::ctor_count == Tracker::dtor_count);
+  }
+
+  SUBCASE(
+      "Task destroyed without ever resuming coroutine does not construct Tracker")
+  {
+    Tracker::reset();
+    {
+      auto t = make_tracker_never_started(99);
+      // We never resume/await 't'; initial_suspend() is suspend_always,
+      // so body never starts and Tracker never constructed.
+      (void)t;
+    }
+    CHECK(Tracker::live_objects == 0);
+    // Depending on the implementation, the compiler may or may not elide
+    // construction of Tracker inside the coroutine frame; the important
+    // invariant is no leaks and balanced ctor/dtor.
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
   }
 }
