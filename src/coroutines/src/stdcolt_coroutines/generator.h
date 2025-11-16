@@ -49,7 +49,7 @@ namespace stdcolt::coroutines
       alignas(std::max(alignof(T), alignof(std::exception_ptr))) char storage
           [std::max(sizeof(T), sizeof(std::exception_ptr))];
       /// @brief The state of the storage
-      StorageState state;
+      StorageState state = StorageState::EMPTY;
 
       /// @brief Creates the generator
       /// @return Generator
@@ -92,18 +92,25 @@ namespace stdcolt::coroutines
       {
         if (state == StorageState::EXCEPT)
         {
-          // guard against double destructor in `unhandled_exception`
           state = StorageState::EMPTY;
           ((std::exception_ptr*)storage)->~exception_ptr();
         }
         else if (state == StorageState::VALUE)
         {
-          // guard against double destructor in `unhandled_exception`
           state = StorageState::EMPTY;
           ((T*)storage)->~T();
         }
-        new (storage) T(std::forward<From>(from));
-        state = StorageState::VALUE;
+
+        try
+        {
+          new (storage) T(std::forward<From>(from));
+          state = StorageState::VALUE;
+        }
+        catch (...)
+        {
+          new (storage) std::exception_ptr(std::current_exception());
+          state = StorageState::EXCEPT;
+        }
         return {};
       }
 
@@ -111,27 +118,18 @@ namespace stdcolt::coroutines
       void return_void() const noexcept {}
 
       /// @brief Destroys the promise, calling the destructor of the
-      /// stored value. Any exception is swallowed silently.
+      /// stored value.
       ~promise_type() noexcept
       {
-        try
+        if (state == StorageState::EXCEPT)
         {
-          if (state == StorageState::EXCEPT)
-          {
-            // guard against double destructor in `unhandled_exception`
-            state = StorageState::EMPTY;
-            ((std::exception_ptr*)storage)->~exception_ptr();
-          }
-          else if (state == StorageState::VALUE)
-          {
-            // guard against double destructor in `unhandled_exception`
-            state = StorageState::EMPTY;
-            ((T*)storage)->~T();
-          }
+          state = StorageState::EMPTY;
+          ((std::exception_ptr*)storage)->~exception_ptr();
         }
-        catch (...)
+        else if (state == StorageState::VALUE)
         {
-          // swallow any exception
+          state = StorageState::EMPTY;
+          ((T*)storage)->~T();
         }
       }
     };
@@ -238,11 +236,9 @@ namespace stdcolt::coroutines
       if (!full)
         return std::nullopt;
 
-      full                    = false;
-      auto& promise           = handle.promise();
-      std::optional<T> result = std::move(promise.value);
-      promise.value.reset();
-      return result;
+      full          = false;
+      auto& promise = handle.promise();
+      return std::move(*(T*)promise.storage);
     }
 
     /// @brief Check if the generator has a value to produce
