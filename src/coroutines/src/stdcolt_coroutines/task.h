@@ -124,7 +124,8 @@ namespace stdcolt::coroutines
     {
       if (state == StorageState::EXCEPT)
         std::rethrow_exception(get_exception());
-      return get_value();
+      else
+        return get_value();
     }
 
     /// @brief Returns the result, or throws the unhandled exception
@@ -133,7 +134,8 @@ namespace stdcolt::coroutines
     {
       if (state == StorageState::EXCEPT)
         std::rethrow_exception(get_exception());
-      return std::move(get_value());
+      else
+        return std::move(get_value());
     }
   };
 
