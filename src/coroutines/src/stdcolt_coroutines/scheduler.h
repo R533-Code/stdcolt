@@ -14,6 +14,7 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <type_traits>
 #include <concurrentqueue.h>
 #include <stdcolt_coroutines/task.h>
 #include <stdcolt_coroutines/synchronization/flag.h>
@@ -28,6 +29,8 @@ namespace stdcolt::coroutines
   /// @brief Promise for use by ScheduledTask
   struct ScheduledTaskPromiseBase
   {
+    std::atomic<size_t> refcount{0};
+
     /// @brief Awaitable that starts the continuation.
     struct final_awaitable
     {
@@ -35,11 +38,7 @@ namespace stdcolt::coroutines
 
       template<typename PROMISE>
       std::coroutine_handle<> await_suspend(
-          std::coroutine_handle<PROMISE> handle) const noexcept
-      {
-        auto ret = handle.promise().continuation;
-        return ret ? ret : std::noop_coroutine();
-      }
+          std::coroutine_handle<PROMISE> handle) const noexcept;
 
       void await_resume() const noexcept {}
     };
@@ -67,6 +66,27 @@ namespace stdcolt::coroutines
     using type = ScheduledTask<T>;
   };
 
+  template<typename Promise>
+  inline void intrusive_add_ref(std::coroutine_handle<Promise> h) noexcept
+  {
+    static_assert(
+        std::is_base_of_v<ScheduledTaskPromiseBase, Promise>,
+        "Promise must derive from ScheduledTaskPromiseBase");
+    auto& base = static_cast<ScheduledTaskPromiseBase&>(h.promise());
+    base.refcount.fetch_add(1, std::memory_order_relaxed);
+  }
+
+  template<typename Promise>
+  inline void intrusive_release_ref(std::coroutine_handle<Promise> h) noexcept
+  {
+    static_assert(
+        std::is_base_of_v<ScheduledTaskPromiseBase, Promise>,
+        "Promise must derive from ScheduledTaskPromiseBase");
+    auto& base = static_cast<ScheduledTaskPromiseBase&>(h.promise());
+    if (base.refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
+      h.destroy();
+  }
+
   template<typename T>
   class ScheduledTask
   {
@@ -84,10 +104,13 @@ namespace stdcolt::coroutines
 
       bool await_ready() const noexcept { return !h || h.done(); }
 
-      std::coroutine_handle<> await_suspend(std::coroutine_handle<> cont) noexcept
+      bool await_suspend(std::coroutine_handle<> cont) noexcept
       {
+        if (!h || h.done())
+          return false;
+
         h.promise().continuation = cont;
-        return h;
+        return true;
       }
 
       decltype(auto) await_resume()
@@ -122,15 +145,55 @@ namespace stdcolt::coroutines
 
   public:
     ScheduledTask() noexcept = default;
+
     explicit ScheduledTask(std::coroutine_handle<promise_type> h) noexcept
         : handle(h)
     {
+      if (handle)
+        intrusive_add_ref(handle);
     }
 
-    ScheduledTask(const ScheduledTask&)                = default;
-    ScheduledTask& operator=(const ScheduledTask&)     = default;
-    ScheduledTask(ScheduledTask&&) noexcept            = default;
-    ScheduledTask& operator=(ScheduledTask&&) noexcept = default;
+    ScheduledTask(const ScheduledTask& other) noexcept
+        : handle(other.handle)
+    {
+      if (handle)
+        intrusive_add_ref(handle);
+    }
+
+    ScheduledTask& operator=(const ScheduledTask& other) noexcept
+    {
+      if (this == &other)
+        return *this;
+      if (handle)
+        intrusive_release_ref(handle);
+      handle = other.handle;
+      if (handle)
+        intrusive_add_ref(handle);
+      return *this;
+    }
+
+    ScheduledTask(ScheduledTask&& other) noexcept
+        : handle(other.handle)
+    {
+      other.handle = nullptr;
+    }
+
+    ScheduledTask& operator=(ScheduledTask&& other) noexcept
+    {
+      if (this == &other)
+        return *this;
+      if (handle)
+        intrusive_release_ref(handle);
+      handle       = other.handle;
+      other.handle = nullptr;
+      return *this;
+    }
+
+    ~ScheduledTask()
+    {
+      if (handle)
+        intrusive_release_ref(handle);
+    }
 
     bool valid() const noexcept { return static_cast<bool>(handle); }
     bool is_ready() const noexcept { return !handle || handle.done(); }
@@ -155,7 +218,9 @@ namespace stdcolt::coroutines
 
         std::coroutine_handle<> await_suspend(std::coroutine_handle<> cont) noexcept
         {
-          h.promise().set_continuation(cont);
+          if (!h || h.done())
+            return std::noop_coroutine();
+          h.promise().continuation = cont;
           return h;
         }
 
@@ -172,6 +237,7 @@ namespace stdcolt::coroutines
     struct Node
     {
       std::coroutine_handle<> h;
+      void (*release_fn)(std::coroutine_handle<>) = nullptr;
     };
 
     /// @brief Worker state
@@ -212,9 +278,9 @@ namespace stdcolt::coroutines
       if (thread_count == 0)
         thread_count = 1;
 
-      _workers.reserve(thread_count);
+      _workers.resize(thread_count);
       for (size_t i = 0; i < thread_count; ++i)
-        _workers.emplace_back(std::thread([this, i] { run_worker(i); }));
+        _workers[i].thread = std::thread([this, i] { run_worker(i); });
     }
 
     /// @brief Destroys the scheduler, waiting for all the tasks to be done
@@ -252,19 +318,28 @@ namespace stdcolt::coroutines
     ScheduledTask<T> adopt(
         std::coroutine_handle<typename ScheduledTask<T>::promise_type> h)
     {
-      auto* node = new Node{h};
+      using promise_type = typename ScheduledTask<T>::promise_type;
+
+      auto* node = new Node{
+          h, [](std::coroutine_handle<> uh)
+          {
+            auto th =
+                std::coroutine_handle<promise_type>::from_address(uh.address());
+            intrusive_release_ref(th);
+          }};
+
+      intrusive_add_ref(h);
       _active_tasks.fetch_add(1, std::memory_order_acq_rel);
 
       const size_t idx =
           _next_worker.fetch_add(1, std::memory_order_relaxed) % _workers.size();
-
-      enqueue_node(node, idx);
 
       auto& p     = h.promise();
       p.scheduler = this;
       p.node      = node;
       p.worker_id = idx;
 
+      enqueue_node(node, idx);
       return ScheduledTask<T>{h};
     }
 
@@ -283,7 +358,7 @@ namespace stdcolt::coroutines
         auto idx   = p.worker_id;
 
         if (s && node && idx < s->_workers.size())
-          enqueue_node(node, idx);
+          s->enqueue_node(node, idx);
       }
 
       void await_resume() const noexcept {}
@@ -292,6 +367,8 @@ namespace stdcolt::coroutines
     auto yield() noexcept { return yield_awaiter{this}; }
 
   private:
+    friend struct ScheduledTaskPromiseBase::final_awaitable;
+
     void enqueue_node(Node* node, size_t idx) noexcept
     {
       _workers[idx].queue.enqueue(node);
@@ -347,29 +424,42 @@ namespace stdcolt::coroutines
       }
     }
 
+    void mark_one_as_done()
+    {
+      const auto prev = _active_tasks.fetch_sub(1, std::memory_order_acq_rel);
+      if (prev == 1)
+      {
+        std::lock_guard lk(_wait_mutex);
+        _wait_cv.notify_all();
+      }
+    }
+
     void resume_or_destroy(Node* node)
     {
+      auto finalize = [this, node]()
+      {
+        if (auto h = node->h; h)
+        {
+          if (node->release_fn)
+            node->release_fn(h);
+        }
+        delete node;
+      };
+
       auto h = node->h;
       if (!h)
       {
-        delete node;
+        finalize();
         return;
       }
-
       if (h.done())
       {
-        h.destroy();
-        delete node;
-
-        const auto prev = _active_tasks.fetch_sub(1, std::memory_order_acq_rel);
-        if (prev == 1)
-        {
-          std::lock_guard lk(_wait_mutex);
-          _wait_cv.notify_all();
-        }
+        finalize();
         return;
       }
       h.resume();
+      if (h.done())
+        finalize();
     }
   };
 
@@ -392,7 +482,7 @@ namespace stdcolt::coroutines
   /// @param st The task to schedule
   /// @return The scheduled task
   template<typename T>
-  ScheduledTask<T> co_spawn(ThreadPoolScheduler& sched, ScheduledTask<T>&& st)
+  ScheduledTask<T> co_spawn(ThreadPoolScheduler& sched, ScheduledTask<T> st)
   {
     using promise_type = typename ScheduledTask<T>::promise_type;
     auto h             = st.get_handle();
@@ -416,6 +506,15 @@ namespace stdcolt::coroutines
     if (!h)
       return ScheduledTask<T>{};
     return sched.adopt<T>(h);
+  }
+
+  template<typename PROMISE>
+  std::coroutine_handle<> ScheduledTaskPromiseBase::final_awaitable::await_suspend(
+      std::coroutine_handle<PROMISE> handle) const noexcept
+  {
+    auto ret = handle.promise().continuation;
+    handle.promise().scheduler->mark_one_as_done();
+    return ret ? ret : std::noop_coroutine();
   }
 } // namespace stdcolt::coroutines
 
