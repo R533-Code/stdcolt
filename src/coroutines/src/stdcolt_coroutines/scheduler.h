@@ -48,6 +48,19 @@ namespace stdcolt::coroutines
     /// @brief Final suspension point
     auto final_suspend() const noexcept { return final_awaitable{}; }
 
+    /// @brief Increments the reference count
+    inline void ref_add() noexcept
+    {
+      refcount.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    /// @brief Decrements the reference count
+    /// @return True if the object has no longer any owner, else false
+    inline bool ref_remove() noexcept
+    {
+      return refcount.fetch_sub(1, std::memory_order_acq_rel) == 1;
+    }
+
     /// @brief The coroutine to start executing after the final suspend
     std::coroutine_handle<> continuation{};
     /// @brief The owning thread pool
@@ -66,27 +79,6 @@ namespace stdcolt::coroutines
     using type = ScheduledTask<T>;
   };
 
-  template<typename Promise>
-  inline void intrusive_add_ref(std::coroutine_handle<Promise> h) noexcept
-  {
-    static_assert(
-        std::is_base_of_v<ScheduledTaskPromiseBase, Promise>,
-        "Promise must derive from ScheduledTaskPromiseBase");
-    auto& base = static_cast<ScheduledTaskPromiseBase&>(h.promise());
-    base.refcount.fetch_add(1, std::memory_order_relaxed);
-  }
-
-  template<typename Promise>
-  inline void intrusive_release_ref(std::coroutine_handle<Promise> h) noexcept
-  {
-    static_assert(
-        std::is_base_of_v<ScheduledTaskPromiseBase, Promise>,
-        "Promise must derive from ScheduledTaskPromiseBase");
-    auto& base = static_cast<ScheduledTaskPromiseBase&>(h.promise());
-    if (base.refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
-      h.destroy();
-  }
-
   template<typename T>
   class ScheduledTask
   {
@@ -104,13 +96,9 @@ namespace stdcolt::coroutines
 
       bool await_ready() const noexcept { return !h || h.done(); }
 
-      bool await_suspend(std::coroutine_handle<> cont) noexcept
+      void await_suspend(std::coroutine_handle<> cont) noexcept
       {
-        if (!h || h.done())
-          return false;
-
         h.promise().continuation = cont;
-        return true;
       }
 
       decltype(auto) await_resume()
@@ -150,25 +138,26 @@ namespace stdcolt::coroutines
         : handle(h)
     {
       if (handle)
-        intrusive_add_ref(handle);
+        handle.promise().ref_add();
     }
 
     ScheduledTask(const ScheduledTask& other) noexcept
         : handle(other.handle)
     {
       if (handle)
-        intrusive_add_ref(handle);
+        handle.promise().ref_add();
     }
 
     ScheduledTask& operator=(const ScheduledTask& other) noexcept
     {
       if (this == &other)
         return *this;
-      if (handle)
-        intrusive_release_ref(handle);
+      if (handle && handle.promise().ref_remove())
+        handle.destroy();
+
       handle = other.handle;
       if (handle)
-        intrusive_add_ref(handle);
+        handle.promise().ref_add();
       return *this;
     }
 
@@ -182,8 +171,8 @@ namespace stdcolt::coroutines
     {
       if (this == &other)
         return *this;
-      if (handle)
-        intrusive_release_ref(handle);
+      if (handle && handle.promise().ref_remove())
+        handle.destroy();
       handle       = other.handle;
       other.handle = nullptr;
       return *this;
@@ -191,8 +180,8 @@ namespace stdcolt::coroutines
 
     ~ScheduledTask()
     {
-      if (handle)
-        intrusive_release_ref(handle);
+      if (handle && handle.promise().ref_remove())
+        handle.destroy();
     }
 
     bool valid() const noexcept { return static_cast<bool>(handle); }
@@ -325,10 +314,13 @@ namespace stdcolt::coroutines
           {
             auto th =
                 std::coroutine_handle<promise_type>::from_address(uh.address());
-            intrusive_release_ref(th);
+            if (th && th.promise().ref_remove())
+              th.destroy();
           }};
 
-      intrusive_add_ref(h);
+      auto& base = static_cast<ScheduledTaskPromiseBase&>(h.promise());
+      base.refcount.fetch_add(1, std::memory_order_release);
+
       _active_tasks.fetch_add(1, std::memory_order_acq_rel);
 
       const size_t idx =
