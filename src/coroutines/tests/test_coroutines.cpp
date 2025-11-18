@@ -216,6 +216,8 @@ inline SyncTaskVoid sync_await_void(Task<void> t)
   co_await t;
 }
 
+// sync_await_scheduled* are intentionally not used for ScheduledTask
+// because ScheduledTask is driven exclusively by ThreadPoolScheduler.
 template<typename T>
 SyncTask<T> sync_await_scheduled(ScheduledTask<T> st)
 {
@@ -278,60 +280,72 @@ Task<void> increment_ref_task(Task<int&> t)
   ++r;
   co_return;
 }
+
 Task<Tracker> make_tracker_task(int v)
 {
   co_return Tracker{v};
 }
+
 Task<Tracker> make_tracker_throw_after_construct(int v)
 {
   Tracker t{v};
   throw std::runtime_error("");
   co_return t;
 }
+
 Task<Tracker> make_tracker_never_started(int v)
 {
   co_return Tracker{v};
 }
+
 Generator<int> make_counter(int n)
 {
   for (int i = 0; i < n; ++i)
     co_yield i;
 }
+
 Generator<int> make_empty()
 {
   co_return;
 }
+
 Generator<int> make_throwing()
 {
   co_yield 1;
   throw std::runtime_error("");
 }
+
 Generator<double> make_double_from_ints()
 {
   co_yield 1;
   co_yield 2;
 }
+
 static Generator<Tracker> gen_unconsumed_value()
 {
   co_yield Tracker{42};
   co_return;
 }
+
 static Generator<Tracker> gen_overwrite_value()
 {
   co_yield Tracker{1};
   co_yield Tracker{2};
   co_return;
 }
+
 static Generator<Tracker> gen_throw_after_value()
 {
   co_yield Tracker{7};
   throw std::runtime_error("");
 }
+
 static Generator<Tracker> gen_throw_before_yield()
 {
   throw std::runtime_error("");
   co_return;
 }
+
 static Generator<Tracker> gen_yield_once()
 {
   co_yield Tracker{10};
@@ -561,6 +575,7 @@ TEST_CASE("stdcolt/coroutines")
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
   }
+
   SUBCASE("simple value task returns value")
   {
     auto t   = make_value_task(42);
@@ -608,6 +623,7 @@ TEST_CASE("stdcolt/coroutines")
     auto res = sync_await(std::move(t1)).get();
     CHECK(res == 2);
   }
+
   SUBCASE("void task executes side effects")
   {
     int x  = 0;
@@ -632,6 +648,7 @@ TEST_CASE("stdcolt/coroutines")
     sync_await_void(std::move(t)).get();
     CHECK(x == 7);
   }
+
   SUBCASE("Task<T&> propagates reference and allows mutation")
   {
     int value = 10;
@@ -658,6 +675,7 @@ TEST_CASE("stdcolt/coroutines")
     sync_await_void(std::move(u)).get();
     CHECK(value == 4);
   }
+
   SUBCASE("Task<T> propagates exception to awaiter")
   {
     auto t = make_throwing_task();
@@ -699,6 +717,7 @@ TEST_CASE("stdcolt/coroutines")
 
     runner(std::move(t)).get();
   }
+
   SUBCASE("Task can be awaited from another Task")
   {
     auto t = make_value_task(10);
@@ -735,6 +754,7 @@ TEST_CASE("stdcolt/coroutines")
     auto res     = sync_await(std::move(doubled)).get();
     CHECK(res == 42);
   }
+
   SUBCASE("promise destroys value when Task is destroyed without consuming result")
   {
     Tracker::reset();
@@ -812,8 +832,22 @@ TEST_CASE("stdcolt/coroutines")
     auto t  = make_value_task(42);
     auto st = co_spawn(sched, std::move(t));
 
-    auto res = sync_await_scheduled(std::move(st)).get();
-    CHECK(res == 42);
+    int result = 0;
+    bool done  = false;
+
+    auto joiner = [&](ScheduledTask<int> s) -> ScheduledTask<void>
+    {
+      result = co_await s;
+      done   = true;
+      co_return;
+    };
+
+    co_spawn(sched, joiner(std::move(st)));
+
+    sched.wait_idle();
+
+    CHECK(done);
+    CHECK(result == 42);
   }
 
   SUBCASE("ScheduledTask<void> executes side effects")
@@ -826,9 +860,22 @@ TEST_CASE("stdcolt/coroutines")
     CHECK(x == 0);
 
     auto st = co_spawn(sched, std::move(t));
-    sync_await_scheduled_void(std::move(st)).get();
+
+    bool done = false;
+
+    auto joiner = [&](ScheduledTask<void> s) -> ScheduledTask<void>
+    {
+      co_await s;
+      done = true;
+      co_return;
+    };
+
+    co_spawn(sched, joiner(std::move(st)));
+
+    sched.wait_idle();
 
     CHECK(x == 1);
+    CHECK(done);
   }
 
   SUBCASE("ScheduledTask<T&> propagates reference and allows mutation")
@@ -839,14 +886,20 @@ TEST_CASE("stdcolt/coroutines")
     auto t    = make_ref_task(value);
     auto st   = co_spawn(sched, std::move(t));
 
-    auto use = [](ScheduledTask<int&> s) -> SyncTaskVoid
+    bool done = false;
+
+    auto use = [&](ScheduledTask<int&> s) -> ScheduledTask<void>
     {
       int& r = co_await s;
       r += 5;
+      done = true;
       co_return;
     };
 
-    use(std::move(st)).get();
+    co_spawn(sched, use(std::move(st)));
+    sched.wait_idle();
+
+    CHECK(done);
     CHECK(value == 15);
   }
 
@@ -857,7 +910,9 @@ TEST_CASE("stdcolt/coroutines")
     auto t  = make_throwing_task();
     auto st = co_spawn(sched, std::move(t));
 
-    auto runner = [](ScheduledTask<int> s) -> SyncTaskVoid
+    bool caught = false;
+
+    auto runner = [&](ScheduledTask<int> s) -> ScheduledTask<void>
     {
       try
       {
@@ -867,11 +922,15 @@ TEST_CASE("stdcolt/coroutines")
       catch (const std::runtime_error& e)
       {
         CHECK(std::string(e.what()) == "");
+        caught = true;
       }
       co_return;
     };
 
-    runner(std::move(st)).get();
+    co_spawn(sched, runner(std::move(st)));
+    sched.wait_idle();
+
+    CHECK(caught);
   }
 
   SUBCASE("ScheduledTask<void> propagates exceptions to awaiter")
@@ -881,7 +940,9 @@ TEST_CASE("stdcolt/coroutines")
     auto t  = make_throwing_void_task();
     auto st = co_spawn(sched, std::move(t));
 
-    auto runner = [](ScheduledTask<void> s) -> SyncTaskVoid
+    bool caught = false;
+
+    auto runner = [&](ScheduledTask<void> s) -> ScheduledTask<void>
     {
       try
       {
@@ -891,11 +952,15 @@ TEST_CASE("stdcolt/coroutines")
       catch (const std::runtime_error& e)
       {
         CHECK(std::string(e.what()) == "");
+        caught = true;
       }
       co_return;
     };
 
-    runner(std::move(st)).get();
+    co_spawn(sched, runner(std::move(st)));
+    sched.wait_idle();
+
+    CHECK(caught);
   }
 
   SUBCASE("Multiple ScheduledTask<void> execute across thread pool")
@@ -911,15 +976,144 @@ TEST_CASE("stdcolt/coroutines")
     };
 
     constexpr int N = 100;
-    std::vector<ScheduledTask<void>> scheduled;
-    scheduled.reserve(N);
 
     for (int i = 0; i < N; ++i)
-      scheduled.push_back(co_spawn(sched, make_inc()));
+      co_spawn(sched, make_inc()); // scheduler owns all tasks
 
-    for (auto& st : scheduled)
-      sync_await_scheduled_void(std::move(st)).get();
+    sched.wait_idle();
 
     CHECK(counter.load(std::memory_order_relaxed) == N);
+  }
+
+  SUBCASE("ThreadPoolScheduler with zero threads creates one worker")
+  {
+    ThreadPoolScheduler sched{0};
+    CHECK(sched.worker_count() == 1);
+  }
+
+  SUBCASE("wait_idle returns immediately when no work is scheduled")
+  {
+    ThreadPoolScheduler sched{4};
+    // Should not block or deadlock
+    sched.wait_idle();
+  }
+
+  SUBCASE("wait_idle waits for all scheduled tasks (with yield)")
+  {
+    ThreadPoolScheduler sched{4};
+
+    std::atomic<int> started{0};
+    std::atomic<int> finished{0};
+
+    auto yielding_task = [&](int) -> ScheduledTask<void>
+    {
+      started.fetch_add(1, std::memory_order_relaxed);
+
+      // Do some work and yield back to the scheduler a few times
+      for (int i = 0; i < 10; ++i)
+        co_await sched.yield();
+
+      finished.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    constexpr int N = 64;
+    for (int i = 0; i < N; ++i)
+      co_spawn(sched, yielding_task(i)); // ignore ScheduledTask, scheduler owns it
+
+    sched.wait_idle();
+
+    CHECK(started.load(std::memory_order_relaxed) == N);
+    CHECK(finished.load(std::memory_order_relaxed) == N);
+  }
+
+  SUBCASE("scheduler destructor waits for all tasks to finish")
+  {
+    std::atomic<int> finished{0};
+
+    {
+      ThreadPoolScheduler sched{4};
+
+      auto work = [&]() -> ScheduledTask<void>
+      {
+        // simulate some work with yields
+        for (int i = 0; i < 20; ++i)
+          co_await sched.yield();
+
+        finished.fetch_add(1, std::memory_order_relaxed);
+        co_return;
+      };
+
+      constexpr int N = 64;
+      for (int i = 0; i < N; ++i)
+        co_spawn(sched, work());
+      // No explicit wait_idle(); destructor must block until all work is done.
+    }
+
+    CHECK(finished.load(std::memory_order_relaxed) == 64);
+  }
+
+  SUBCASE("Tasks can schedule additional tasks while running")
+  {
+    ThreadPoolScheduler sched{4};
+
+    std::atomic<int> inner_counter{0};
+    std::atomic<int> outer_started{0};
+
+    auto inner = [&]() -> ScheduledTask<void>
+    {
+      inner_counter.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    auto outer = [&](int) -> ScheduledTask<void>
+    {
+      outer_started.fetch_add(1, std::memory_order_relaxed);
+
+      // Spawn additional tasks from within a running task
+      constexpr int INNER_PER_OUTER = 4;
+      for (int i = 0; i < INNER_PER_OUTER; ++i)
+        co_spawn(sched, inner());
+
+      // Yield back to the scheduler a few times
+      for (int i = 0; i < 5; ++i)
+        co_await sched.yield();
+
+      co_return;
+    };
+
+    constexpr int OUTER = 16;
+    for (int i = 0; i < OUTER; ++i)
+      co_spawn(sched, outer(i));
+
+    sched.wait_idle();
+
+    CHECK(outer_started.load(std::memory_order_relaxed) == OUTER);
+    CHECK(inner_counter.load(std::memory_order_relaxed) == OUTER * 4);
+  }
+
+  SUBCASE("yield allows tasks to make progress under contention")
+  {
+    ThreadPoolScheduler sched{4};
+
+    std::atomic<int> yield_count{0};
+
+    auto many_yields = [&]() -> ScheduledTask<void>
+    {
+      for (int i = 0; i < 100; ++i)
+      {
+        yield_count.fetch_add(1, std::memory_order_relaxed);
+        co_await sched.yield();
+      }
+      co_return;
+    };
+
+    constexpr int N = 16;
+    for (int i = 0; i < N; ++i)
+      co_spawn(sched, many_yields());
+
+    sched.wait_idle();
+
+    CHECK(yield_count.load(std::memory_order_relaxed) == N * 100);
   }
 }
