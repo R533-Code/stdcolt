@@ -1,4 +1,5 @@
 #include <doctest/doctest.h>
+#include <stdcolt_coroutines/scheduler.h>
 #include <stdcolt_coroutines/task.h>
 #include <stdcolt_coroutines/generator.h>
 #include <stdexcept>
@@ -213,6 +214,17 @@ SyncTask<T> sync_await_move(Task<T> t)
 inline SyncTaskVoid sync_await_void(Task<void> t)
 {
   co_await t;
+}
+
+template<typename T>
+SyncTask<T> sync_await_scheduled(ScheduledTask<T> st)
+{
+  co_return co_await st;
+}
+
+inline SyncTaskVoid sync_await_scheduled_void(ScheduledTask<void> st)
+{
+  co_await st;
 }
 
 template<typename Awaitable>
@@ -596,10 +608,6 @@ TEST_CASE("stdcolt/coroutines")
     auto res = sync_await(std::move(t1)).get();
     CHECK(res == 2);
   }
-}
-
-TEST_CASE("stdcolt/Task void semantics")
-{
   SUBCASE("void task executes side effects")
   {
     int x  = 0;
@@ -624,10 +632,6 @@ TEST_CASE("stdcolt/Task void semantics")
     sync_await_void(std::move(t)).get();
     CHECK(x == 7);
   }
-}
-
-TEST_CASE("stdcolt/Task reference semantics")
-{
   SUBCASE("Task<T&> propagates reference and allows mutation")
   {
     int value = 10;
@@ -654,10 +658,6 @@ TEST_CASE("stdcolt/Task reference semantics")
     sync_await_void(std::move(u)).get();
     CHECK(value == 4);
   }
-}
-
-TEST_CASE("stdcolt/Task exception propagation")
-{
   SUBCASE("Task<T> propagates exception to awaiter")
   {
     auto t = make_throwing_task();
@@ -699,10 +699,6 @@ TEST_CASE("stdcolt/Task exception propagation")
 
     runner(std::move(t)).get();
   }
-}
-
-TEST_CASE("stdcolt/Task chaining and continuations")
-{
   SUBCASE("Task can be awaited from another Task")
   {
     auto t = make_value_task(10);
@@ -739,10 +735,6 @@ TEST_CASE("stdcolt/Task chaining and continuations")
     auto res     = sync_await(std::move(doubled)).get();
     CHECK(res == 42);
   }
-}
-
-TEST_CASE("stdcolt/Task lifetime / Tracker interaction")
-{
   SUBCASE("promise destroys value when Task is destroyed without consuming result")
   {
     Tracker::reset();
@@ -812,5 +804,122 @@ TEST_CASE("stdcolt/Task lifetime / Tracker interaction")
     // construction of Tracker inside the coroutine frame; the important
     // invariant is no leaks and balanced ctor/dtor.
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
+  }
+  SUBCASE("ScheduledTask<int> runs to completion and returns value")
+  {
+    ThreadPoolScheduler sched{2};
+
+    auto t  = make_value_task(42);
+    auto st = co_spawn(sched, std::move(t));
+
+    auto res = sync_await_scheduled(std::move(st)).get();
+    CHECK(res == 42);
+  }
+
+  SUBCASE("ScheduledTask<void> executes side effects")
+  {
+    ThreadPoolScheduler sched{2};
+
+    int x  = 0;
+    auto t = make_void_task_increment(x);
+
+    CHECK(x == 0);
+
+    auto st = co_spawn(sched, std::move(t));
+    sync_await_scheduled_void(std::move(st)).get();
+
+    CHECK(x == 1);
+  }
+
+  SUBCASE("ScheduledTask<T&> propagates reference and allows mutation")
+  {
+    ThreadPoolScheduler sched{2};
+
+    int value = 10;
+    auto t    = make_ref_task(value);
+    auto st   = co_spawn(sched, std::move(t));
+
+    auto use = [](ScheduledTask<int&> s) -> SyncTaskVoid
+    {
+      int& r = co_await s;
+      r += 5;
+      co_return;
+    };
+
+    use(std::move(st)).get();
+    CHECK(value == 15);
+  }
+
+  SUBCASE("ScheduledTask<T> propagates exceptions to awaiter")
+  {
+    ThreadPoolScheduler sched{2};
+
+    auto t  = make_throwing_task();
+    auto st = co_spawn(sched, std::move(t));
+
+    auto runner = [](ScheduledTask<int> s) -> SyncTaskVoid
+    {
+      try
+      {
+        (void)co_await s;
+        CHECK(false); // should not reach
+      }
+      catch (const std::runtime_error& e)
+      {
+        CHECK(std::string(e.what()) == "");
+      }
+      co_return;
+    };
+
+    runner(std::move(st)).get();
+  }
+
+  SUBCASE("ScheduledTask<void> propagates exceptions to awaiter")
+  {
+    ThreadPoolScheduler sched{2};
+
+    auto t  = make_throwing_void_task();
+    auto st = co_spawn(sched, std::move(t));
+
+    auto runner = [](ScheduledTask<void> s) -> SyncTaskVoid
+    {
+      try
+      {
+        co_await s;
+        CHECK(false); // should not reach
+      }
+      catch (const std::runtime_error& e)
+      {
+        CHECK(std::string(e.what()) == "");
+      }
+      co_return;
+    };
+
+    runner(std::move(st)).get();
+  }
+
+  SUBCASE("Multiple ScheduledTask<void> execute across thread pool")
+  {
+    ThreadPoolScheduler sched{4};
+
+    std::atomic<int> counter{0};
+
+    auto make_inc = [&]() -> Task<void>
+    {
+      counter.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    constexpr int N = 100;
+    std::vector<ScheduledTask<void>> scheduled;
+    scheduled.reserve(N);
+
+    for (int i = 0; i < N; ++i)
+      scheduled.push_back(co_spawn(sched, make_inc()));
+
+    for (auto& st : scheduled)
+      sync_await_scheduled_void(std::move(st)).get();
+
+    CHECK(counter.load(std::memory_order_relaxed) == N);
   }
 }
