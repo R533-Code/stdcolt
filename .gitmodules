@@ -16,3 +16,6 @@
 [submodule "3rd_party/nanobind"]
 	path = 3rd_party/nanobind
 	url = https://github.com/wjakob/nanobind.git
+[submodule "3rd_party/concurrentqueue"]
+	path = 3rd_party/concurrentqueue
+	url = https://github.com/cameron314/concurrentqueue.git
