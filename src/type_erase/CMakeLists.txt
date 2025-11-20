@@ -12,3 +12,7 @@ ec_add_tests(test_type_erase
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_type_erase}
 )
+ec_get_target(test_type_erase _test)
+
+ec_copy_dependencies(${_type_erase})
+ec_copy_dependencies(${_test})

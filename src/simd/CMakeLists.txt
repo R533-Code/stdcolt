@@ -20,3 +20,7 @@ ec_add_tests(test_simd
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_simd}
 )
+ec_get_target(test_simd _test)
+
+ec_copy_dependencies(${_simd})
+ec_copy_dependencies(${_test})

@@ -10,3 +10,7 @@ ec_add_tests(test_allocators
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_alloc}
 )
+ec_get_target(test_allocators _test)
+
+ec_copy_dependencies(${_alloc})
+ec_copy_dependencies(${_test})

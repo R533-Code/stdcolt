@@ -11,3 +11,7 @@ ec_add_tests(test_coroutines
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_coroutines}
 )
+ec_get_target(test_coroutines _test)
+
+ec_copy_dependencies(${_coroutines})
+ec_copy_dependencies(${_test})

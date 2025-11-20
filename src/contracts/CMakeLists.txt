@@ -14,3 +14,7 @@ ec_add_tests(test_contracts
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_contracts}
 )
+ec_get_target(test_contracts _test)
+
+ec_copy_dependencies(${_contracts})
+ec_copy_dependencies(${_test})
