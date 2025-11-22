@@ -3,7 +3,7 @@
  * @brief  Contains `ThreadPoolExecutor` and `AsyncScope`.
  * `ThreadPoolExecutor` is a non-owning coroutine executor.
  * 
- * @author RPC
+ * @author Raphael Dib Nehme
  * @date   November 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_COROUTINES_EXECUTOR
