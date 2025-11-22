@@ -1,7 +1,9 @@
 #include <doctest/doctest.h>
-#include <stdcolt_coroutines/scheduler.h>
+#include <stdcolt_coroutines/executor.h>
 #include <stdcolt_coroutines/task.h>
 #include <stdcolt_coroutines/generator.h>
+
+#include <atomic>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -104,8 +106,8 @@ struct SyncTask
 
   std::coroutine_handle<promise_type> handle;
 
-  explicit SyncTask(std::coroutine_handle<promise_type> h) noexcept
-      : handle(h)
+  explicit SyncTask(std::coroutine_handle<promise_type> handle) noexcept
+      : handle(handle)
   {
   }
 
@@ -162,8 +164,8 @@ struct SyncTaskVoid
 
   std::coroutine_handle<promise_type> handle;
 
-  explicit SyncTaskVoid(std::coroutine_handle<promise_type> h) noexcept
-      : handle(h)
+  explicit SyncTaskVoid(std::coroutine_handle<promise_type> handle) noexcept
+      : handle(handle)
   {
   }
 
@@ -214,19 +216,6 @@ SyncTask<T> sync_await_move(Task<T> t)
 inline SyncTaskVoid sync_await_void(Task<void> t)
 {
   co_await t;
-}
-
-// sync_await_scheduled* are intentionally not used for ScheduledTask
-// because ScheduledTask is driven exclusively by ThreadPoolScheduler.
-template<typename T>
-SyncTask<T> sync_await_scheduled(ScheduledTask<T> st)
-{
-  co_return co_await st;
-}
-
-inline SyncTaskVoid sync_await_scheduled_void(ScheduledTask<void> st)
-{
-  co_await st;
 }
 
 template<typename Awaitable>
@@ -497,7 +486,6 @@ TEST_CASE("stdcolt/coroutines")
     {
       auto g = gen_unconsumed_value();
 
-      // Force coroutine to run and place a value into its frame/promise
       CHECK(static_cast<bool>(g));
     }
 
@@ -511,8 +499,6 @@ TEST_CASE("stdcolt/coroutines")
 
     {
       auto g = gen_overwrite_value();
-      // Consume both yields in some way; exact object counts are
-      // implementation-defined, so we only care that it doesn't crash.
       std::vector<int> values;
       for (auto t : g)
         values.push_back(t.value);
@@ -521,7 +507,6 @@ TEST_CASE("stdcolt/coroutines")
       CHECK_EQ(values[0], 1);
       CHECK_EQ(values[1], 2);
     }
-    // All Tracker instances must be properly destroyed.
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
   }
@@ -531,14 +516,11 @@ TEST_CASE("stdcolt/coroutines")
     Tracker::reset();
     {
       auto g = gen_throw_after_value();
-      // First resume: get the value
       auto v = g.next();
       REQUIRE(v.has_value());
       CHECK_EQ(v->value, 7);
-      // Next access rethrows exception captured by unhandled_exception()
       CHECK_THROWS_AS(g.next(), std::runtime_error);
     }
-    // No Tracker leaks, no double-destruction.
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
   }
@@ -548,11 +530,8 @@ TEST_CASE("stdcolt/coroutines")
     Tracker::reset();
     {
       auto g = gen_throw_before_yield();
-      // First attempt to get anything must throw
       CHECK_THROWS_AS(static_cast<bool>(g), std::runtime_error);
     }
-    // No Tracker ever constructed or destroyed in this scenario;
-    // the coroutine never executed a co_yield.
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == 0);
     CHECK(Tracker::dtor_count == 0);
@@ -563,14 +542,9 @@ TEST_CASE("stdcolt/coroutines")
     Tracker::reset();
     {
       auto g = gen_yield_once();
-      // Force value to be created in coroutine frame/promise
       CHECK(static_cast<bool>(g));
-      // Consume the value (move it out)
       Tracker t = g();
-      // Generator goes out of scope at end of this block. Its promise
-      // destructor must not try to destroy a non-existent Tracker in
-      // storage (no double destruction), and there must be no leaks.
-      (void)t; // suppress unused warning
+      (void)t;
     }
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
@@ -593,7 +567,7 @@ TEST_CASE("stdcolt/coroutines")
   SUBCASE("is_ready() false before execution")
   {
     auto t = make_value_task(5);
-    CHECK_FALSE(t.is_ready()); // coroutine not started yet
+    CHECK_FALSE(t.is_ready());
   }
 
   SUBCASE("move construction transfers ownership and leaves source ready")
@@ -603,7 +577,7 @@ TEST_CASE("stdcolt/coroutines")
 
     Task<int> t2 = std::move(t1);
 
-    CHECK(t1.is_ready()); // moved-from: handle == nullptr
+    CHECK(t1.is_ready());
     auto res = sync_await(std::move(t2)).get();
     CHECK(res == 7);
   }
@@ -613,13 +587,12 @@ TEST_CASE("stdcolt/coroutines")
     auto t1 = make_value_task(1);
     auto t2 = make_value_task(2);
 
-    // Force t1 to be a valid task that hasn't run yet
     CHECK_FALSE(t1.is_ready());
     CHECK_FALSE(t2.is_ready());
 
     t1 = std::move(t2);
 
-    CHECK(t2.is_ready()); // moved-from
+    CHECK(t2.is_ready());
     auto res = sync_await(std::move(t1)).get();
     CHECK(res == 2);
   }
@@ -685,7 +658,7 @@ TEST_CASE("stdcolt/coroutines")
       try
       {
         (void)co_await tt;
-        CHECK(false); // should not reach
+        CHECK(false);
       }
       catch (const std::runtime_error& e)
       {
@@ -706,7 +679,7 @@ TEST_CASE("stdcolt/coroutines")
       try
       {
         co_await tt;
-        CHECK(false); // should not reach
+        CHECK(false);
       }
       catch (const std::runtime_error& e)
       {
@@ -733,17 +706,15 @@ TEST_CASE("stdcolt/coroutines")
     auto u = add_two_via_chain(std::move(t));
 
     auto res = sync_await(std::move(u)).get();
-    CHECK(res == 5); // (3 + 1) + 1
+    CHECK(res == 5);
   }
 
   SUBCASE("when_ready() completes before result is consumed")
   {
     auto t = make_value_task(21);
 
-    // First ensure it completes via when_ready()
     sync_await_any(t.when_ready()).get();
 
-    // Now actually consume the result via a second await
     auto consume = [](Task<int> tt) -> Task<int>
     {
       int v = co_await tt;
@@ -761,9 +732,7 @@ TEST_CASE("stdcolt/coroutines")
     {
       auto t = make_tracker_task(42);
 
-      // Run the task to completion but never co_await the value
       sync_await_any(t.when_ready()).get();
-      // 't' goes out of scope here; promise destructor must destroy Tracker
     }
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
@@ -775,7 +744,7 @@ TEST_CASE("stdcolt/coroutines")
     {
       auto consumer = [](Task<Tracker> tt) -> Task<void>
       {
-        Tracker t = co_await tt; // move out of coroutine storage
+        Tracker t = co_await tt;
         (void)t;
         co_return;
       };
@@ -803,8 +772,6 @@ TEST_CASE("stdcolt/coroutines")
 
       runner(std::move(t)).get();
     }
-    // Tracker may be constructed before the throw in coroutine body, but
-    // must be destroyed exactly once; no leaks, no double-destruction.
     CHECK(Tracker::live_objects == 0);
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
   }
@@ -815,109 +782,101 @@ TEST_CASE("stdcolt/coroutines")
     Tracker::reset();
     {
       auto t = make_tracker_never_started(99);
-      // We never resume/await 't'; initial_suspend() is suspend_always,
-      // so body never starts and Tracker never constructed.
       (void)t;
     }
     CHECK(Tracker::live_objects == 0);
-    // Depending on the implementation, the compiler may or may not elide
-    // construction of Tracker inside the coroutine frame; the important
-    // invariant is no leaks and balanced ctor/dtor.
     CHECK(Tracker::ctor_count == Tracker::dtor_count);
   }
-  SUBCASE("ScheduledTask<int> runs to completion and returns value")
+  SUBCASE("Task<int> on executor runs to completion and returns value")
   {
-    ThreadPoolScheduler sched{2};
-
-    auto t  = make_value_task(42);
-    auto st = co_spawn(sched, std::move(t));
+    ThreadPoolExecutor ex{2};
+    AsyncScope scope{ex};
 
     int result = 0;
     bool done  = false;
 
-    auto joiner = [&](ScheduledTask<int> s) -> ScheduledTask<void>
+    auto joiner = [&](Task<int> t) -> Task<void>
     {
-      result = co_await s;
+      result = co_await std::move(t);
       done   = true;
       co_return;
     };
 
-    co_spawn(sched, joiner(std::move(st)));
+    auto t = make_value_task(42);
+    scope.spawn(joiner(std::move(t)));
 
-    sched.wait_idle();
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(done);
     CHECK(result == 42);
   }
-
-  SUBCASE("ScheduledTask<void> executes side effects")
+  SUBCASE("Task<void> executes side effects on executor")
   {
-    ThreadPoolScheduler sched{2};
+    ThreadPoolExecutor ex{2};
+    AsyncScope scope{ex};
 
-    int x  = 0;
-    auto t = make_void_task_increment(x);
-
-    CHECK(x == 0);
-
-    auto st = co_spawn(sched, std::move(t));
-
+    int x     = 0;
     bool done = false;
 
-    auto joiner = [&](ScheduledTask<void> s) -> ScheduledTask<void>
+    auto joiner = [&](Task<void> t) -> Task<void>
     {
-      co_await s;
+      co_await std::move(t);
       done = true;
       co_return;
     };
 
-    co_spawn(sched, joiner(std::move(st)));
+    CHECK(x == 0);
 
-    sched.wait_idle();
+    auto t = make_void_task_increment(x);
+    scope.spawn(joiner(std::move(t)));
+
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(x == 1);
     CHECK(done);
   }
 
-  SUBCASE("ScheduledTask<T&> propagates reference and allows mutation")
+  SUBCASE("Task<T&> on executor propagates reference and allows mutation")
   {
-    ThreadPoolScheduler sched{2};
+    ThreadPoolExecutor ex{2};
+    AsyncScope scope{ex};
 
     int value = 10;
-    auto t    = make_ref_task(value);
-    auto st   = co_spawn(sched, std::move(t));
-
     bool done = false;
 
-    auto use = [&](ScheduledTask<int&> s) -> ScheduledTask<void>
+    auto use = [&](Task<int&> t) -> Task<void>
     {
-      int& r = co_await s;
+      int& r = co_await std::move(t);
       r += 5;
       done = true;
       co_return;
     };
 
-    co_spawn(sched, use(std::move(st)));
-    sched.wait_idle();
+    auto t = make_ref_task(value);
+    scope.spawn(use(std::move(t)));
+
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(done);
     CHECK(value == 15);
   }
 
-  SUBCASE("ScheduledTask<T> propagates exceptions to awaiter")
+  SUBCASE("Task<T> on executor propagates exceptions to awaiter")
   {
-    ThreadPoolScheduler sched{2};
-
-    auto t  = make_throwing_task();
-    auto st = co_spawn(sched, std::move(t));
+    ThreadPoolExecutor ex{2};
+    AsyncScope scope{ex};
 
     bool caught = false;
 
-    auto runner = [&](ScheduledTask<int> s) -> ScheduledTask<void>
+    auto runner = [&](Task<int> t) -> Task<void>
     {
       try
       {
-        (void)co_await s;
-        CHECK(false); // should not reach
+        (void)co_await std::move(t);
+        CHECK(false);
       }
       catch (const std::runtime_error& e)
       {
@@ -927,27 +886,28 @@ TEST_CASE("stdcolt/coroutines")
       co_return;
     };
 
-    co_spawn(sched, runner(std::move(st)));
-    sched.wait_idle();
+    auto t = make_throwing_task();
+    scope.spawn(runner(std::move(t)));
+
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(caught);
   }
 
-  SUBCASE("ScheduledTask<void> propagates exceptions to awaiter")
+  SUBCASE("Task<void> on executor propagates exceptions to awaiter")
   {
-    ThreadPoolScheduler sched{2};
-
-    auto t  = make_throwing_void_task();
-    auto st = co_spawn(sched, std::move(t));
+    ThreadPoolExecutor ex{2};
+    AsyncScope scope{ex};
 
     bool caught = false;
 
-    auto runner = [&](ScheduledTask<void> s) -> ScheduledTask<void>
+    auto runner = [&](Task<void> t) -> Task<void>
     {
       try
       {
-        co_await s;
-        CHECK(false); // should not reach
+        co_await std::move(t);
+        CHECK(false);
       }
       catch (const std::runtime_error& e)
       {
@@ -957,15 +917,19 @@ TEST_CASE("stdcolt/coroutines")
       co_return;
     };
 
-    co_spawn(sched, runner(std::move(st)));
-    sched.wait_idle();
+    auto t = make_throwing_void_task();
+    scope.spawn(runner(std::move(t)));
+
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(caught);
   }
 
-  SUBCASE("Multiple ScheduledTask<void> execute across thread pool")
+  SUBCASE("Multiple Task<void> execute across thread pool")
   {
-    ThreadPoolScheduler sched{4};
+    ThreadPoolExecutor ex{4};
+    AsyncScope scope{ex};
 
     std::atomic<int> counter{0};
 
@@ -978,40 +942,37 @@ TEST_CASE("stdcolt/coroutines")
     constexpr int N = 100;
 
     for (int i = 0; i < N; ++i)
-      co_spawn(sched, make_inc()); // scheduler owns all tasks
+      scope.spawn(make_inc());
 
-    sched.wait_idle();
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(counter.load(std::memory_order_relaxed) == N);
   }
 
-  SUBCASE("ThreadPoolScheduler with zero threads creates one worker")
+  SUBCASE("wait_fence returns immediately when no work is scheduled")
   {
-    ThreadPoolScheduler sched{0};
-    CHECK(sched.worker_count() == 1);
+    ThreadPoolExecutor ex{4};
+    AsyncScope scope{ex};
+
+    scope.wait_fence();
+    ex.stop();
   }
 
-  SUBCASE("wait_idle returns immediately when no work is scheduled")
+  SUBCASE("wait_fence waits for all scheduled tasks (with yield)")
   {
-    ThreadPoolScheduler sched{4};
-    // Should not block or deadlock
-    sched.wait_idle();
-  }
-
-  SUBCASE("wait_idle waits for all scheduled tasks (with yield)")
-  {
-    ThreadPoolScheduler sched{4};
+    ThreadPoolExecutor ex{4};
+    AsyncScope scope{ex};
 
     std::atomic<int> started{0};
     std::atomic<int> finished{0};
 
-    auto yielding_task = [&](int) -> ScheduledTask<void>
+    auto yielding_task = [&](int) -> Task<void>
     {
       started.fetch_add(1, std::memory_order_relaxed);
 
-      // Do some work and yield back to the scheduler a few times
       for (int i = 0; i < 10; ++i)
-        co_await sched.yield();
+        co_await ex.yield();
 
       finished.fetch_add(1, std::memory_order_relaxed);
       co_return;
@@ -1019,26 +980,27 @@ TEST_CASE("stdcolt/coroutines")
 
     constexpr int N = 64;
     for (int i = 0; i < N; ++i)
-      co_spawn(sched, yielding_task(i)); // ignore ScheduledTask, scheduler owns it
+      scope.spawn(yielding_task(i));
 
-    sched.wait_idle();
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(started.load(std::memory_order_relaxed) == N);
     CHECK(finished.load(std::memory_order_relaxed) == N);
   }
 
-  SUBCASE("scheduler destructor waits for all tasks to finish")
+  SUBCASE("executor destructor after scope idle sees all work finished")
   {
     std::atomic<int> finished{0};
 
     {
-      ThreadPoolScheduler sched{4};
+      ThreadPoolExecutor ex{4};
+      AsyncScope scope{ex};
 
-      auto work = [&]() -> ScheduledTask<void>
+      auto work = [&]() -> Task<void>
       {
-        // simulate some work with yields
         for (int i = 0; i < 20; ++i)
-          co_await sched.yield();
+          co_await ex.yield();
 
         finished.fetch_add(1, std::memory_order_relaxed);
         co_return;
@@ -1046,47 +1008,49 @@ TEST_CASE("stdcolt/coroutines")
 
       constexpr int N = 64;
       for (int i = 0; i < N; ++i)
-        co_spawn(sched, work());
-      // No explicit wait_idle(); destructor must block until all work is done.
+        scope.spawn(work());
+
+      scope.wait_fence();
+      ex.stop();
     }
 
     CHECK(finished.load(std::memory_order_relaxed) == 64);
   }
 
-  SUBCASE("Tasks can schedule additional tasks while running")
+  SUBCASE("Tasks can schedule additional tasks while running on executor")
   {
-    ThreadPoolScheduler sched{4};
+    ThreadPoolExecutor ex{4};
+    AsyncScope scope{ex};
 
     std::atomic<int> inner_counter{0};
     std::atomic<int> outer_started{0};
 
-    auto inner = [&]() -> ScheduledTask<void>
+    auto inner = [&]() -> Task<void>
     {
       inner_counter.fetch_add(1, std::memory_order_relaxed);
       co_return;
     };
 
-    auto outer = [&](int) -> ScheduledTask<void>
+    auto outer = [&](int) -> Task<void>
     {
       outer_started.fetch_add(1, std::memory_order_relaxed);
 
-      // Spawn additional tasks from within a running task
       constexpr int INNER_PER_OUTER = 4;
       for (int i = 0; i < INNER_PER_OUTER; ++i)
-        co_spawn(sched, inner());
+        scope.spawn(inner());
 
-      // Yield back to the scheduler a few times
       for (int i = 0; i < 5; ++i)
-        co_await sched.yield();
+        co_await ex.yield();
 
       co_return;
     };
 
     constexpr int OUTER = 16;
     for (int i = 0; i < OUTER; ++i)
-      co_spawn(sched, outer(i));
+      scope.spawn(outer(i));
 
-    sched.wait_idle();
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(outer_started.load(std::memory_order_relaxed) == OUTER);
     CHECK(inner_counter.load(std::memory_order_relaxed) == OUTER * 4);
@@ -1094,26 +1058,163 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("yield allows tasks to make progress under contention")
   {
-    ThreadPoolScheduler sched{4};
+    ThreadPoolExecutor ex{4};
+    AsyncScope scope{ex};
 
     std::atomic<int> yield_count{0};
 
-    auto many_yields = [&]() -> ScheduledTask<void>
+    auto many_yields = [&]() -> Task<void>
     {
       for (int i = 0; i < 100; ++i)
       {
         yield_count.fetch_add(1, std::memory_order_relaxed);
-        co_await sched.yield();
+        co_await ex.yield();
       }
       co_return;
     };
 
     constexpr int N = 16;
     for (int i = 0; i < N; ++i)
-      co_spawn(sched, many_yields());
+      scope.spawn(many_yields());
 
-    sched.wait_idle();
+    scope.wait_fence();
+    ex.stop();
 
     CHECK(yield_count.load(std::memory_order_relaxed) == N * 100);
+  }
+
+  SUBCASE("Task<int> stress: many values across pool on executor")
+  {
+    ThreadPoolExecutor ex{8};
+    AsyncScope scope{ex};
+
+    std::atomic<long long> sum{0};
+
+    auto value_task = [&](int v) -> Task<int>
+    {
+      for (int i = 0; i < 5; ++i)
+        co_await ex.yield();
+      co_return v;
+    };
+
+    auto joiner = [&](Task<int> t) -> Task<void>
+    {
+      for (int i = 0; i < 3; ++i)
+        co_await ex.yield();
+
+      int v = co_await std::move(t);
+      sum.fetch_add(v, std::memory_order_relaxed);
+      co_return;
+    };
+
+    constexpr int N = 500;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(joiner(value_task(i)));
+
+    scope.wait_fence();
+    ex.stop();
+
+    long long expected = static_cast<long long>(N - 1) * N / 2;
+    CHECK(sum.load(std::memory_order_relaxed) == expected);
+  }
+
+  SUBCASE("Task<int> stress: values and exceptions on executor")
+  {
+    ThreadPoolExecutor ex{8};
+    AsyncScope scope{ex};
+
+    std::atomic<int> success_count{0};
+    std::atomic<int> exception_count{0};
+    std::atomic<long long> sum{0};
+
+    auto maybe_throw_task = [&](int v) -> Task<int>
+    {
+      for (int i = 0; i < 3; ++i)
+        co_await ex.yield();
+
+      if (v % 3 == 0)
+        throw std::runtime_error("");
+      co_return v;
+    };
+
+    auto joiner = [&](Task<int> t) -> Task<void>
+    {
+      for (int i = 0; i < 2; ++i)
+        co_await ex.yield();
+
+      try
+      {
+        int v = co_await std::move(t);
+        sum.fetch_add(v, std::memory_order_relaxed);
+        success_count.fetch_add(1, std::memory_order_relaxed);
+      }
+      catch (const std::runtime_error&)
+      {
+        exception_count.fetch_add(1, std::memory_order_relaxed);
+      }
+      co_return;
+    };
+
+    constexpr int N = 600;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(joiner(maybe_throw_task(i)));
+
+    scope.wait_fence();
+    ex.stop();
+
+    int successes  = success_count.load(std::memory_order_relaxed);
+    int exceptions = exception_count.load(std::memory_order_relaxed);
+
+    CHECK(successes + exceptions == N);
+    CHECK(exceptions == N / 3);
+
+    long long expected_sum = 0;
+    for (int i = 0; i < N; ++i)
+    {
+      if (i % 3 != 0)
+        expected_sum += i;
+    }
+    CHECK(sum.load(std::memory_order_relaxed) == expected_sum);
+  }
+
+  SUBCASE("Task<void> stress: nested scheduling and yields on executor")
+  {
+    ThreadPoolExecutor ex{8};
+    AsyncScope scope{ex};
+
+    std::atomic<int> outer_count{0};
+    std::atomic<int> inner_count{0};
+
+    auto inner = [&]() -> Task<void>
+    {
+      for (int i = 0; i < 5; ++i)
+        co_await ex.yield();
+
+      inner_count.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    auto outer = [&]() -> Task<void>
+    {
+      outer_count.fetch_add(1, std::memory_order_relaxed);
+      constexpr int INNER_PER_OUTER = 4;
+      for (int i = 0; i < INNER_PER_OUTER; ++i)
+        scope.spawn(inner());
+
+      for (int i = 0; i < 10; ++i)
+        co_await ex.yield();
+
+      co_return;
+    };
+
+    constexpr int OUTER = 64;
+    for (int i = 0; i < OUTER; ++i)
+      scope.spawn(outer());
+
+    scope.wait_fence();
+    ex.stop();
+
+    CHECK(outer_count.load(std::memory_order_relaxed) == OUTER);
+    CHECK(inner_count.load(std::memory_order_relaxed) == OUTER * 4);
   }
 }
