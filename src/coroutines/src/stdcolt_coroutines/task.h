@@ -68,6 +68,16 @@ namespace stdcolt::coroutines
   public:
     /// @brief Constructor, initializes to an empty state
     generic_task_promise() noexcept = default;
+    /// @brief Constructor, forwards the arguments to the PROMISE_BASE
+    /// @tparam ...Args Parameter pack
+    /// @param ...args Argument pack
+    template<typename... Args>
+      requires std::constructible_from<PROMISE_BASE, Args&&...>
+    generic_task_promise(Args&&... args) noexcept(
+        std::is_nothrow_constructible_v<PROMISE_BASE, Args&&...>)
+        : PROMISE_BASE(std::forward<Args>(args)...)
+    {
+    }
     /// @brief Destructor, destroys the value if there is one
     ~generic_task_promise()
     {
@@ -146,6 +156,16 @@ namespace stdcolt::coroutines
 
   public:
     generic_task_promise() noexcept = default;
+    /// @brief Constructor, forwards the arguments to the PROMISE_BASE
+    /// @tparam ...Args Parameter pack
+    /// @param ...args Argument pack
+    template<typename... Args>
+      requires std::constructible_from<PROMISE_BASE, Args&&...>
+    generic_task_promise(Args&&... args) noexcept(
+        std::is_nothrow_constructible_v<PROMISE_BASE, Args&&...>)
+        : PROMISE_BASE(std::forward<Args>(args)...)
+    {
+    }
 
     using return_type =
         typename return_object_for_promise_base<PROMISE_BASE>::template type<void>;
@@ -175,6 +195,16 @@ namespace stdcolt::coroutines
 
   public:
     generic_task_promise() noexcept = default;
+    /// @brief Constructor, forwards the arguments to the PROMISE_BASE
+    /// @tparam ...Args Parameter pack
+    /// @param ...args Argument pack
+    template<typename... Args>
+      requires std::constructible_from<PROMISE_BASE, Args&&...>
+    generic_task_promise(Args&&... args) noexcept(
+        std::is_nothrow_constructible_v<PROMISE_BASE, Args&&...>)
+        : PROMISE_BASE(std::forward<Args>(args)...)
+    {
+    }
 
     using return_type =
         typename return_object_for_promise_base<PROMISE_BASE>::template type<T&>;
@@ -204,7 +234,7 @@ namespace stdcolt::coroutines
   struct TaskPromiseBase
   {
     /// @brief The coroutine to continue after the final suspension point
-    std::coroutine_handle<> continuation;
+    std::coroutine_handle<> continuation{};
 
     /// @brief Awaitable for `final_suspend`
     struct final_awaitable
