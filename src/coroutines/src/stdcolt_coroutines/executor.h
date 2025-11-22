@@ -291,6 +291,13 @@ namespace stdcolt::coroutines
       }
     }
 
+    /// @brief Returns the executor
+    /// @return The executor
+    ThreadPoolExecutor& executor() noexcept { return _executor; }
+    /// @brief Returns the executor
+    /// @return The executor
+    const ThreadPoolExecutor& executor() const noexcept { return _executor; }
+
   private:
     /// @brief The thread pool executor
     ThreadPoolExecutor& _executor;
@@ -441,6 +448,13 @@ namespace stdcolt::coroutines
     }
     /// @brief Destructor, waits for all tasks to be done
     ~BlockingAsyncScope() { _scope.wait_fence(); }
+
+    /// @brief Returns the executor
+    /// @return The executor
+    ThreadPoolExecutor& executor() noexcept { return _scope.executor(); }
+    /// @brief Returns the executor
+    /// @return The executor
+    const ThreadPoolExecutor& executor() const noexcept { return _scope.executor(); }
 
     /// @brief Spawns a task
     /// @tparam Awaitable The awaitable
