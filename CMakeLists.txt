@@ -35,6 +35,19 @@ set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/dist/" CACHE PATH "" FORCE)
 add_subdirectory("3rd_party/ECMake")
 
 # ###########################
+# Set C++/python bindings
+# ###########################
+option(STDCOLT_BUILD_PYTHON_BINDINGS
+    "Set to true to build python bindings of the C++ code"
+    ON
+)
+
+if(STDCOLT_BUILD_PYTHON_BINDINGS)
+    find_package(Python 3.13 REQUIRED COMPONENTS Interpreter Development)
+    ec_add_subdirectory("3rd_party/nanobind")
+endif()
+
+# ###########################
 # Setup C++ testing framework
 # ###########################
 ec_add_subdirectory_static("3rd_party/doctest")
