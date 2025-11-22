@@ -15,3 +15,10 @@ ec_get_target(test_coroutines _test)
 
 ec_copy_dependencies(${_coroutines})
 ec_copy_dependencies(${_test})
+
+if(STDCOLT_BUILD_PYTHON_BINDINGS)
+    ec_add_python_bindings(pycolt_coroutines
+        BINDING_FRAMEWORK nanobind
+        LINK_WITH PUBLIC ${_coroutines}
+    )
+endif()
