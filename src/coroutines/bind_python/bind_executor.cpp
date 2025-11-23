@@ -4,6 +4,9 @@
 #include <coroutine>
 #include <memory>
 #include <utility>
+#include <vector>
+#include <stdexcept>
+
 #include <stdcolt_coroutines/executor.h>
 
 namespace nb = nanobind;
@@ -29,11 +32,18 @@ struct PyAwaitable
   {
   }
 
-  void start(std::shared_ptr<PyCoroutineState> st) { impl->start(std::move(st)); }
+  void start(std::shared_ptr<PyCoroutineState> st)
+  {
+    if (!impl)
+      throw std::runtime_error(
+          "PyAwaitable has no implementation (impl == nullptr)");
+    impl->start(std::move(st));
+  }
 };
 
 struct PyAwaitIter
 {
+  // Python object owning the C++ PyAwaitable instance
   nb::object aw;
   bool done = false;
 };
@@ -61,6 +71,7 @@ struct BindingDetachedTask
     void return_void() const noexcept {}
     void unhandled_exception() const noexcept
     {
+      // Should not leak into Python; terminate for now
       std::terminate();
     }
   };
@@ -118,9 +129,9 @@ struct PyCoroutineState
   ThreadPoolExecutor* ex = nullptr;
   // Python coroutine object (fn(*args))
   nb::object coro;
-  // coro.__await__() iterator
-  nb::object await_iter;
-  // optional return value (unused for now)
+  // Stack of iterators from __await__ of nested awaitables
+  std::vector<nb::object> iters;
+  // optional return value
   nb::object result;
   std::exception_ptr error;
   bool done = false;
@@ -181,49 +192,149 @@ static void step_py_coroutine(std::shared_ptr<PyCoroutineState> st)
 
   try
   {
-    if (!st->await_iter.is_valid())
-      st->await_iter = st->coro.attr("__await__")();
+    // Initialize iterator stack on first entry
+    if (st->iters.empty())
+      st->iters.emplace_back(st->coro.attr("__await__")());
 
-    PyObject* next_obj = PyIter_Next(st->await_iter.ptr());
-    if (!next_obj)
+    // Helper to handle a yielded object.
+    auto handle_yielded = [&](nb::object&& yielded) -> bool
     {
-      if (PyErr_Occurred())
+      // Case 1: engine awaitable (PyAwaitable)
+      try
       {
-        if (PyErr_ExceptionMatches(PyExc_StopIteration))
-        {
-          PyErr_Clear();
-          st->done = true;
-          resume_caller(st);
-          return;
-        }
-        else
-        {
-          st->error = std::current_exception();
-          PyErr_Clear();
-          st->done = true;
-          resume_caller(st);
-          return;
-        }
+        auto& pyaw = nb::cast<PyAwaitable&>(yielded);
+        pyaw.start(
+            std::move(st)); // will eventually call step_py_coroutine(st) again
+        return true;        // suspended on engine awaitable
+      }
+      catch (const nb::cast_error&)
+      {
+        // Not a PyAwaitable; fall through
       }
 
-      st->done = true;
-      resume_caller(st);
-      return;
-    }
+      // Case 2: generic Python awaitable (has __await__)
+      if (PyObject_HasAttrString(yielded.ptr(), "__await__"))
+      {
+        nb::object sub_iter = yielded.attr("__await__")();
+        st->iters.emplace_back(std::move(sub_iter));
+        // Continue loop with new top-of-stack
+        return false;
+      }
 
-    nb::object yielded = nb::steal<nb::object>(next_obj);
-    try
-    {
-      auto& pyaw = nb::cast<PyAwaitable&>(yielded);
-      pyaw.start(std::move(st));
-      return;
-    }
-    catch (const nb::cast_error&)
-    {
+      // Case 3: unsupported yield
       st->error = std::make_exception_ptr(
           std::runtime_error("Unsupported object yielded from Python coroutine"));
       st->done = true;
       resume_caller(st);
+      return true; // treat as terminal
+    };
+
+    while (true)
+    {
+      if (st->iters.empty())
+      {
+        // All awaitables finished, top-level done
+        st->done = true;
+        resume_caller(st);
+        return;
+      }
+
+      nb::object& current_iter = st->iters.back();
+
+      PyObject* next_obj = PyIter_Next(current_iter.ptr());
+      if (!next_obj)
+      {
+        // Either StopIteration or some error
+        if (PyErr_Occurred())
+        {
+          if (PyErr_ExceptionMatches(PyExc_StopIteration))
+          {
+            // Extract StopIteration.value
+            PyObject* type = nullptr;
+            PyObject* exc  = nullptr;
+            PyObject* tb   = nullptr;
+            PyErr_Fetch(&type, &exc, &tb);
+            nb::object exc_obj = nb::steal<nb::object>(exc ? exc : Py_None);
+            Py_XDECREF(type);
+            Py_XDECREF(tb);
+            nb::object value = exc_obj.attr("value");
+            PyErr_Clear();
+
+            // This awaitable is done: pop its iterator
+            st->iters.pop_back();
+
+            if (st->iters.empty())
+            {
+              // Top-level coroutine finished
+              st->result = std::move(value);
+              st->done   = true;
+              resume_caller(st);
+              return;
+            }
+            else
+            {
+              // Send the result into the previous iterator
+              nb::object& parent_iter = st->iters.back();
+
+              PyObject* send_result =
+                  PyObject_CallMethod(parent_iter.ptr(), "send", "O", value.ptr());
+
+              if (!send_result)
+              {
+                if (PyErr_Occurred())
+                {
+                  if (PyErr_ExceptionMatches(PyExc_StopIteration))
+                  {
+                    // Parent iterator finished as well; loop will handle on next iteration
+                    PyErr_Clear();
+                    continue;
+                  }
+                  st->error = std::current_exception();
+                  PyErr_Clear();
+                  st->done = true;
+                  resume_caller(st);
+                  return;
+                }
+                // No error set but no result returned: treat as done
+                continue;
+              }
+
+              // Parent yielded something; handle it
+              nb::object yielded = nb::steal<nb::object>(send_result);
+              if (handle_yielded(std::move(yielded)))
+                return; // either suspended or errored
+              // else: continue loop with possibly new iterator on stack
+              continue;
+            }
+          }
+          else
+          {
+            // Some other Python exception
+            st->error = std::current_exception();
+            PyErr_Clear();
+            st->done = true;
+            resume_caller(st);
+            return;
+          }
+        }
+
+        // No error set: treat as normal end of iterator
+        st->iters.pop_back();
+        if (st->iters.empty())
+        {
+          st->done = true;
+          resume_caller(st);
+          return;
+        }
+        continue;
+      }
+
+      // We got a yielded object from the current iterator
+      nb::object yielded = nb::steal<nb::object>(next_obj);
+      if (handle_yielded(std::move(yielded)))
+        return; // suspended or errored; stop stepping for now
+
+      // else: continue loop (possibly with new iterator pushed)
     }
   }
   catch (...)
@@ -289,6 +400,7 @@ void bind_python_bind_executor(nanobind::module_& m)
             if (self.done)
               throw nb::stop_iteration();
             self.done = true;
+            // Yield the stored Python PyAwaitable object
             return self.aw;
           });
 
@@ -297,6 +409,7 @@ void bind_python_bind_executor(nanobind::module_& m)
           "__await__",
           [](PyAwaitable& self)
           {
+            // Create Python object owning this C++ instance
             nb::object o = nb::cast(&self, nb::rv_policy::reference);
             return PyAwaitIter{std::move(o)};
           });
