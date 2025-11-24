@@ -1,7 +1,7 @@
 /*****************************************************************/ /**
  * @file   executor.h
- * @brief  Contains `ThreadPoolExecutor` and `AsyncScope`.
- * `ThreadPoolExecutor` is a non-owning coroutine executor.
+ * @brief  Contains `Executor` and `AsyncScope`.
+ * Use `make_executor` to create a multithreaded executor.
  * 
  * @author Raphael Dib Nehme
  * @date   November 2025
@@ -17,55 +17,96 @@
 #include <chrono>
 #include <utility>
 #include <type_traits>
+#include <stdcolt_contracts/contracts.h>
 #include <stdcolt_coroutines/task.h>
 #include <stdcolt_coroutines/atomic_coroutine_handle.h>
 #include <stdcolt_coroutines_export.h>
+#include <memory>
 
 namespace stdcolt::coroutines
 {
-  /// @brief Non-owning coroutine executor
-  class ThreadPoolExecutor
+  /// @brief Base class for all executors
+  class Executor
   {
   public:
     /// @brief The handle type (coroutine handle)
-    using handle_t = std::coroutine_handle<>;
+    using handle = std::coroutine_handle<>;
+    /// @brief The clock used by executors
+    using clock = std::chrono::steady_clock;
+    /// @brief The time point used for scheduling
+    using time_point = clock::time_point;
+    /// @brief The duration used for scheduling
+    using duration = clock::duration;
+    /// @brief Destructor
+    virtual ~Executor() = default;
 
-    /// @brief Constructor
-    /// @param thread_count The number of threads the executor may use, max(1, thread_count)
-    explicit ThreadPoolExecutor(
-        size_t thread_count = std::thread::hardware_concurrency())
+    /// @brief The error code when calling `post`
+    enum class PostStatus : uint8_t
     {
-      if (thread_count == 0)
-        thread_count = 1;
-      // must resize not reserve so that no reallocation may occur
-      _workers.resize(thread_count);
-      for (size_t i = 0; i < thread_count; ++i)
-        _workers[i].thread = std::thread([this, i] { worker_loop(i); });
-    }
-    /// @brief Destructor, drops the remaining work
-    ~ThreadPoolExecutor() { stop(); }
+      /// @brief Successfully posted coroutine
+      POST_SUCCESS = 0,
+      /// @brief Failed due to missing memory
+      POST_FAIL_MEMORY = 1,
+      /// @brief Failed as executor is (being) stopped
+      POST_FAIL_STOPPED = 2,
+      /// @brief Failed as executor does not provide this feature
+      POST_FAIL_NOT_IMPLEMENTED = 3,
+      /// @brief Failed as requested time point is in the past.
+      /// This may only be returned by the `post` overload that takes a time point.
+      POST_FAIL_DEADLINE_PASSED = 4,
+    };
 
-    ThreadPoolExecutor(ThreadPoolExecutor&&)                 = delete;
-    ThreadPoolExecutor(const ThreadPoolExecutor&)            = delete;
-    ThreadPoolExecutor& operator=(ThreadPoolExecutor&&)      = delete;
-    ThreadPoolExecutor& operator=(const ThreadPoolExecutor&) = delete;
-
-    /// @brief Post a coroutine to evaluate in the thread pool
-    /// @param h The coroutine to evaluate
-    void post(handle_t h) noexcept
+    /// @brief The result of awaiting
+    enum class DelayStatus : uint8_t
     {
-      // if we are in a specific worker thread, do not go through
-      // the global queue, instead directly enqueue in that thread.
-      if (tls_executor_info.executor == this
-          && tls_executor_info.worker_id != invalid_index)
-        _workers[tls_executor_info.worker_id].queue.enqueue(h);
-      else
-        _global_queue.enqueue(h);
+      /// @brief Success, coroutine woke up at (approximately) the requested time
+      DELAY_SUCCESS = 0,
+      /// @brief Success, coroutine woke up, but noticeably later than requested
+      DELAY_SUCCESS_LATE = 1,
+      /// @brief Success, coroutine woke up, but noticeably earlier than requested
+      DELAY_SUCCESS_EARLY = 2,
 
-      _work_epoch.fetch_add(1, std::memory_order_release);
-      _work_epoch.notify_one();
-      // ^^^ as the pool does work stealing, only a single one is needed.
+      /// @brief The requested time point was already in the past
+      DELAY_FAIL_DEADLINE_PASSED = 3,
+      /// @brief The underlying post failed, out of memory
+      DELAY_FAIL_MEMORY = 4,
+      /// @brief The underlying post failed, executor is stopped/stopping
+      DELAY_FAIL_STOPPED = 5,
+      /// @brief The executor does not support scheduling in the future
+      DELAY_FAIL_NOT_IMPLEMENTED = 6,
+    };
+
+    /// @brief Converts a `PostStatus` representing an error to a `DelayStatus` representing an error
+    /// @param ps The `PostStatus` (!= `POST_SUCCESS`)
+    /// @return DelayStatus equivalent
+    static constexpr DelayStatus to_delay_failure(PostStatus ps) noexcept
+    {
+      switch_no_default(ps)
+      {
+      case PostStatus::POST_FAIL_DEADLINE_PASSED:
+        return DelayStatus::DELAY_FAIL_DEADLINE_PASSED;
+      case PostStatus::POST_FAIL_MEMORY:
+        return DelayStatus::DELAY_FAIL_MEMORY;
+      case PostStatus::POST_FAIL_STOPPED:
+        return DelayStatus::DELAY_FAIL_STOPPED;
+      case PostStatus::POST_FAIL_NOT_IMPLEMENTED:
+        return DelayStatus::DELAY_FAIL_NOT_IMPLEMENTED;
+      }
     }
+
+    /// @brief Posts a coroutine to be executed immediately.
+    /// @param h The coroutine handle
+    /// @return True on success, false on failure
+    virtual PostStatus post(handle h) noexcept = 0;
+    /// @brief Posts a coroutine to be executed at a specific time point.
+    /// @param h The coroutine handle
+    /// @param when The time point when to execute the coroutine
+    /// @return True on success, false on failure
+    virtual PostStatus post(handle h, time_point when) noexcept = 0;
+    /// @brief Stops the executor, dropping any work remaining
+    /// This method is thread safe and idempotent.
+    /// @warning This function must never be called on one of the worker threads.
+    virtual void stop() noexcept = 0;
 
     /// @brief Awaiter, schedules a coroutine to run through this executor
     /// @note This is exactly the same as `yield`
@@ -74,9 +115,9 @@ namespace stdcolt::coroutines
     {
       struct awaiter
       {
-        ThreadPoolExecutor* ex;
+        Executor* ex;
         bool await_ready() const noexcept { return false; }
-        void await_suspend(handle_t h) const noexcept { ex->post(h); }
+        void await_suspend(handle h) const noexcept { ex->post(h); }
         void await_resume() const noexcept {}
       };
       return awaiter{this};
@@ -86,124 +127,86 @@ namespace stdcolt::coroutines
     /// @return Awaiter
     auto yield() noexcept { return schedule(); }
 
-    /// @brief Stops the executor. Work is not drained.
-    /// This method is thread safe and idempotent.
-    /// @warning This function must never be called on one of the worker threads.
-    void stop() noexcept
+    /// @brief Schedule a coroutine to resume at a specific time point
+    /// @param when When to resume the coroutine
+    /// @param tolerance The tolerance (for EARLY/LATE successes)
+    /// @return Awaitable that yields a DelayStatus
+    auto schedule_at(time_point when, duration tolerance = duration::zero()) noexcept
     {
-      if (_stopping.load(std::memory_order_acquire) == 2)
-        return;
+      tolerance = tolerance < duration::zero() ? -tolerance : tolerance;
 
-      // acquire on failure as if expected == 2 we return directly
-      if (int32_t expected = 0; !_stopping.compare_exchange_strong(
-              expected, 1, std::memory_order_acq_rel, std::memory_order_acquire))
+      struct awaiter
       {
-        // if expected is not 1, then it is 2 and we can avoid calling .wait
-        if (expected == 1)
-          _stopping.wait(1, std::memory_order_acquire);
-        return;
-      }
-      _work_epoch.fetch_add(1, std::memory_order_release);
-      _work_epoch.notify_all();
+        Executor* ex;
+        time_point when;
+        duration tolerance;
+        PostStatus post_status = PostStatus::POST_SUCCESS;
+        time_point expected{};
 
-      // there is only a single thread that can be here vvv
-      for (auto& [thread, _] : _workers)
-      {
-        if (thread.joinable())
-          thread.join();
-      }
-      _stopping.store(2, std::memory_order_release);
-      _stopping.notify_all();
-      // ^^^ wake up all threads waiting
+        bool await_ready() noexcept
+        {
+          expected = when;
+          if (auto now = clock::now(); now >= when)
+          {
+            post_status = PostStatus::POST_FAIL_DEADLINE_PASSED;
+            return true;
+          }
+          return false;
+        }
+
+        bool await_suspend(handle h) noexcept
+        {
+          if (post_status == PostStatus::POST_SUCCESS)
+            post_status = ex->post(h, when);
+          return post_status == PostStatus::POST_SUCCESS;
+        }
+
+        DelayStatus await_resume() const noexcept
+        {
+          using enum DelayStatus;
+          if (post_status != PostStatus::POST_SUCCESS)
+            return to_delay_failure(post_status);
+
+          // post() succeeded, we actually resumed
+          if (tolerance > duration::zero())
+          {
+            auto now  = clock::now();
+            auto diff = now - expected;
+            if (diff > tolerance)
+              return DELAY_SUCCESS_LATE;
+            if (diff < -tolerance)
+              return DELAY_SUCCESS_EARLY;
+            return DELAY_SUCCESS;
+          }
+          // if there is no tolerance, then always return success
+          return DELAY_SUCCESS;
+        }
+      };
+      return awaiter{this, when, tolerance};
     }
 
-  private:
-    /// @brief Worker, must have a stable address
-    struct Worker
+    /// @brief Schedule a coroutine to resume after a relative duration
+    /// @param d Delay duration
+    /// @param tolerance Allowed deviation before classifying as EARLY/LATE
+    /// @return Awaiter that yields a DelayStatus
+    auto schedule_after(duration d, duration tolerance = duration::zero()) noexcept
     {
-      /// @brief The actual worker thread
-      std::thread thread;
-      /// @brief The local queue.
-      /// This queue is concurrent to allow safe work stealing.
-      moodycamel::ConcurrentQueue<handle_t> queue;
-    };
-
-    /// @brief Work epoch for efficient waiting
-    /// It is preferable to use 32 bit integers for a direct lowering to futexes.
-    std::atomic<uint32_t> _work_epoch{0};
-    /// @brief Array of workers, size constant throughout lifetime
-    std::vector<Worker> _workers;
-    /// @brief Global queue from which worker may pop work
-    moodycamel::ConcurrentQueue<handle_t> _global_queue;
-    /// @brief If 0, stop was not requested, if 1, stop requested, if 2 stopped
-    /// It is preferable to use 32 bit integers for a direct lowering to futexes.
-    std::atomic<int32_t> _stopping{0};
-
-    /// @brief Invalid index to represent an invalid worker ID
-    static constexpr size_t invalid_index = (size_t)-1;
-    /// @brief Information that describes an executor's worker
-    struct ThreadPoolExecutorInfo
-    {
-      /// @brief The actual executor (has a stable address)
-      ThreadPoolExecutor* executor = nullptr;
-      /// @brief The worker ID (index into the vector of that executor)
-      size_t worker_id = invalid_index;
-    };
-    /// @brief Thread local executor info for enqueuing directly in the same worker
-    static thread_local ThreadPoolExecutorInfo tls_executor_info;
-
-    /// @brief Worker function
-    /// @param index The index into the vector of workers
-    void worker_loop(size_t index)
-    {
-      tls_executor_info = {this, index};
-
-      auto& self_queue          = _workers[index].queue;
-      const size_t worker_count = _workers.size();
-
-      while (!_stopping.load(std::memory_order_acquire))
-      {
-        handle_t h;
-
-        // dequeue from the local or on empty local queue, from the global
-        if (self_queue.try_dequeue(h) || _global_queue.try_dequeue(h))
-        {
-          if (!h.done())
-            h.resume();
-          continue;
-        }
-
-        // steal from other workers
-        bool stolen = false;
-        for (size_t i = 0; i < worker_count; ++i)
-        {
-          if (i == index)
-            continue;
-          if (_workers[i].queue.try_dequeue(h))
-          {
-            stolen = true;
-            if (!h.done())
-              h.resume();
-            break;
-          }
-        }
-        if (stolen)
-          continue;
-
-        // if there is no work to be done, sleep efficiently
-        auto expected = _work_epoch.load(std::memory_order_acquire);
-        if (_stopping.load(std::memory_order_acquire))
-          break;
-        _work_epoch.wait(expected, std::memory_order_acquire);
-      }
-
-      tls_executor_info = {nullptr, invalid_index};
+      return schedule_at(clock::now() + d, tolerance);
     }
   };
 
-  /// @brief Initialized to empty info
-  inline thread_local ThreadPoolExecutor::ThreadPoolExecutorInfo
-      ThreadPoolExecutor::tls_executor_info = {};
+  /// @brief Creates a multithreaded executor.
+  /// For less overhead, if an executor is needed only for its `post(handle)`
+  /// overload, not `post(handle, time_point)`, set `with_scheduler` to false.
+  /// If `with_scheduler` is false, any call that schedules in the future
+  /// will return a 'not implemented' error code.
+  /// @param thread_count The number of threads of the executor
+  /// @param with_scheduler If true, add support for scheduling coroutines
+  /// @return Valid executor on success
+  STDCOLT_COROUTINES_EXPORT
+  std::unique_ptr<Executor> make_executor(
+      size_t thread_count = std::thread::hardware_concurrency(),
+      bool with_scheduler = true) noexcept;
 
   /// @brief Coroutine owner that schedules task to an executor
   class AsyncScope
@@ -211,7 +214,7 @@ namespace stdcolt::coroutines
   public:
     /// @brief Constructor
     /// @param ex The executor
-    explicit AsyncScope(ThreadPoolExecutor& ex) noexcept
+    explicit AsyncScope(Executor& ex) noexcept
         : _executor(ex)
     {
     }
@@ -293,14 +296,14 @@ namespace stdcolt::coroutines
 
     /// @brief Returns the executor
     /// @return The executor
-    ThreadPoolExecutor& executor() noexcept { return _executor; }
+    Executor& executor() noexcept { return _executor; }
     /// @brief Returns the executor
     /// @return The executor
-    const ThreadPoolExecutor& executor() const noexcept { return _executor; }
+    const Executor& executor() const noexcept { return _executor; }
 
   private:
     /// @brief The thread pool executor
-    ThreadPoolExecutor& _executor;
+    Executor& _executor;
     /// @brief The number of pending tasks
     std::atomic<size_t> _pending{0};
     /// @brief Coroutine waiting for the scope to no longer have any tasks
@@ -442,7 +445,7 @@ namespace stdcolt::coroutines
   {
     /// @brief Constructor
     /// @param ex The executor to use when spawning tasks
-    explicit BlockingAsyncScope(ThreadPoolExecutor& ex)
+    explicit BlockingAsyncScope(Executor& ex)
         : _scope(ex)
     {
     }
@@ -451,10 +454,10 @@ namespace stdcolt::coroutines
 
     /// @brief Returns the executor
     /// @return The executor
-    ThreadPoolExecutor& executor() noexcept { return _scope.executor(); }
+    Executor& executor() noexcept { return _scope.executor(); }
     /// @brief Returns the executor
     /// @return The executor
-    const ThreadPoolExecutor& executor() const noexcept { return _scope.executor(); }
+    const Executor& executor() const noexcept { return _scope.executor(); }
 
     /// @brief Spawns a task
     /// @tparam Awaitable The awaitable
