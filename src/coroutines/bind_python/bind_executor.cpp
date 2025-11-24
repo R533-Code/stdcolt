@@ -1,4 +1,6 @@
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/chrono.h>
+#include <nanobind/stl/unique_ptr.h>
 #include <nanobind/stl/tuple.h>
 
 #include <coroutine>
@@ -126,7 +128,7 @@ struct PyCoroutineStateDeleter
 struct PyCoroutineState
 {
   // executor driving this coroutine
-  ThreadPoolExecutor* ex = nullptr;
+  Executor* ex = nullptr;
   // Python coroutine object (fn(*args))
   nb::object coro;
   // Stack of iterators from __await__ of nested awaitables
@@ -136,13 +138,13 @@ struct PyCoroutineState
   std::exception_ptr error;
   bool done = false;
   // C++ coroutine awaiting us
-  ThreadPoolExecutor::handle_t handle{};
+  Executor::handle handle{};
 };
 
 static void step_py_coroutine(std::shared_ptr<PyCoroutineState> st);
 
 static BindingDetachedTask start_step(
-    ThreadPoolExecutor* ex, std::shared_ptr<PyCoroutineState> st)
+    Executor* ex, std::shared_ptr<PyCoroutineState> st)
 {
   co_await ex->schedule();
   step_py_coroutine(std::move(st));
@@ -155,7 +157,7 @@ struct PyCoroutineTask
 
   bool await_ready() const noexcept { return st->done; }
 
-  void await_suspend(ThreadPoolExecutor::handle_t h)
+  void await_suspend(Executor::handle h)
   {
     st->handle             = h;
     BindingDetachedTask dt = start_step(st->ex, st);
@@ -170,8 +172,7 @@ struct PyCoroutineTask
   }
 };
 
-static BindingDetachedTask resume_on_executor(
-    ThreadPoolExecutor* ex, ThreadPoolExecutor::handle_t h)
+static BindingDetachedTask resume_on_executor(Executor* ex, Executor::handle h)
 {
   co_await ex->schedule();
   if (h && !h.done())
@@ -348,17 +349,17 @@ static void step_py_coroutine(std::shared_ptr<PyCoroutineState> st)
 template<typename Awaitable>
 struct AwaitableModel : PyAwaitable::Concept
 {
-  ThreadPoolExecutor* ex;
+  Executor* ex;
   Awaitable aw;
 
-  AwaitableModel(ThreadPoolExecutor* ex_, Awaitable&& a)
+  AwaitableModel(Executor* ex_, Awaitable&& a)
       : ex(ex_)
       , aw(std::move(a))
   {
   }
 
   static BindingDetachedTask run(
-      ThreadPoolExecutor* ex, Awaitable aw, std::shared_ptr<PyCoroutineState> st)
+      Executor* ex, Awaitable aw, std::shared_ptr<PyCoroutineState> st)
   {
     co_await ex->schedule();
     try
@@ -382,7 +383,7 @@ struct AwaitableModel : PyAwaitable::Concept
 };
 
 template<typename Awaitable>
-PyAwaitable make_py_awaitable(ThreadPoolExecutor& ex, Awaitable&& aw)
+PyAwaitable make_py_awaitable(Executor& ex, Awaitable&& aw)
 {
   using Model = AwaitableModel<std::decay_t<Awaitable>>;
   auto impl   = std::make_shared<Model>(&ex, std::forward<Awaitable>(aw));
@@ -400,39 +401,50 @@ void bind_python_bind_executor(nanobind::module_& m)
             if (self.done)
               throw nb::stop_iteration();
             self.done = true;
-            // Yield the stored Python PyAwaitable object
+            // yield the stored Python PyAwaitable object
             return self.aw;
           });
 
   nb::class_<PyAwaitable>(m, "PyAwaitable")
       .def(
           "__await__",
-          [](PyAwaitable& self)
+          [](nb::handle py_self)
           {
-            // Create Python object owning this C++ instance
-            nb::object o = nb::cast(&self, nb::rv_policy::reference);
+            nb::object o = nb::borrow(py_self);
             return PyAwaitIter{std::move(o)};
           });
 
-  nb::class_<ThreadPoolExecutor>(m, "ThreadPoolExecutor")
-      .def(
-          nb::init<size_t>(),
-          nb::arg("thread_count") = std::thread::hardware_concurrency())
+  auto exec = nb::class_<Executor>(m, "Executor");
+  exec.def_static(
+          "new", &make_executor,
+          nb::arg("thread_count")   = std::thread::hardware_concurrency(),
+          nb::arg("with_scheduler") = true)
       .def(
           "stop",
-          [](ThreadPoolExecutor& ex)
+          [](Executor& ex)
           {
             nb::gil_scoped_release release;
             ex.stop();
           })
       .def(
-          "yield_now", [](ThreadPoolExecutor& ex)
-          { return make_py_awaitable(ex, ex.schedule()); });
+          "yield_now",
+          [](Executor& ex) { return make_py_awaitable(ex, ex.yield()); })
+      .def(
+          "schedule",
+          [](Executor& ex) { return make_py_awaitable(ex, ex.schedule()); })
+      .def(
+          "schedule_at",
+          [](Executor& ex, Executor::time_point tm, Executor::duration tolerance)
+          { return make_py_awaitable(ex, ex.schedule_at(tm, tolerance)); },
+          nb::arg("time_point"), nb::arg("tolerance") = Executor::duration::zero())
+      .def(
+          "schedule_after",
+          [](Executor& ex, Executor::duration after, Executor::duration tolerance)
+          { return make_py_awaitable(ex, ex.schedule_after(after, tolerance)); },
+          nb::arg("after"), nb::arg("tolerance") = Executor::duration::zero());
 
   nb::class_<AsyncScope>(m, "AsyncScope")
-      .def(
-          nb::init<ThreadPoolExecutor&>(), nb::arg("executor"),
-          nb::rv_policy::reference)
+      .def(nb::init<Executor&>(), nb::arg("executor"), nb::keep_alive<1, 2>())
       .def(
           "wait_fence",
           [](AsyncScope& scope)
