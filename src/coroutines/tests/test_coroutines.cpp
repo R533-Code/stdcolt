@@ -789,8 +789,8 @@ TEST_CASE("stdcolt/coroutines")
   }
   SUBCASE("Task<int> on executor runs to completion and returns value")
   {
-    ThreadPoolExecutor ex{2};
-    AsyncScope scope{ex};
+    auto ex = make_executor(2);
+    AsyncScope scope{*ex};
 
     int result = 0;
     bool done  = false;
@@ -806,15 +806,15 @@ TEST_CASE("stdcolt/coroutines")
     scope.spawn(joiner(std::move(t)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(done);
     CHECK(result == 42);
   }
   SUBCASE("Task<void> executes side effects on executor")
   {
-    ThreadPoolExecutor ex{2};
-    AsyncScope scope{ex};
+    auto ex = make_executor(2);
+    AsyncScope scope{*ex};
 
     int x     = 0;
     bool done = false;
@@ -832,7 +832,7 @@ TEST_CASE("stdcolt/coroutines")
     scope.spawn(joiner(std::move(t)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(x == 1);
     CHECK(done);
@@ -840,8 +840,8 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("Task<T&> on executor propagates reference and allows mutation")
   {
-    ThreadPoolExecutor ex{2};
-    AsyncScope scope{ex};
+    auto ex = make_executor(2);
+    AsyncScope scope{*ex};
 
     int value = 10;
     bool done = false;
@@ -858,7 +858,7 @@ TEST_CASE("stdcolt/coroutines")
     scope.spawn(use(std::move(t)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(done);
     CHECK(value == 15);
@@ -866,8 +866,8 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("Task<T> on executor propagates exceptions to awaiter")
   {
-    ThreadPoolExecutor ex{2};
-    AsyncScope scope{ex};
+    auto ex = make_executor(2);
+    AsyncScope scope{*ex};
 
     bool caught = false;
 
@@ -890,15 +890,15 @@ TEST_CASE("stdcolt/coroutines")
     scope.spawn(runner(std::move(t)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(caught);
   }
 
   SUBCASE("Task<void> on executor propagates exceptions to awaiter")
   {
-    ThreadPoolExecutor ex{2};
-    AsyncScope scope{ex};
+    auto ex = make_executor(2);
+    AsyncScope scope{*ex};
 
     bool caught = false;
 
@@ -921,15 +921,15 @@ TEST_CASE("stdcolt/coroutines")
     scope.spawn(runner(std::move(t)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(caught);
   }
 
   SUBCASE("Multiple Task<void> execute across thread pool")
   {
-    ThreadPoolExecutor ex{4};
-    AsyncScope scope{ex};
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
 
     std::atomic<int> counter{0};
 
@@ -945,24 +945,24 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(make_inc());
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(counter.load(std::memory_order_relaxed) == N);
   }
 
   SUBCASE("wait_fence returns immediately when no work is scheduled")
   {
-    ThreadPoolExecutor ex{4};
-    AsyncScope scope{ex};
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
   }
 
   SUBCASE("wait_fence waits for all scheduled tasks (with yield)")
   {
-    ThreadPoolExecutor ex{4};
-    AsyncScope scope{ex};
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
 
     std::atomic<int> started{0};
     std::atomic<int> finished{0};
@@ -972,7 +972,7 @@ TEST_CASE("stdcolt/coroutines")
       started.fetch_add(1, std::memory_order_relaxed);
 
       for (int i = 0; i < 10; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       finished.fetch_add(1, std::memory_order_relaxed);
       co_return;
@@ -983,7 +983,7 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(yielding_task(i));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(started.load(std::memory_order_relaxed) == N);
     CHECK(finished.load(std::memory_order_relaxed) == N);
@@ -994,13 +994,13 @@ TEST_CASE("stdcolt/coroutines")
     std::atomic<int> finished{0};
 
     {
-      ThreadPoolExecutor ex{4};
-      AsyncScope scope{ex};
+      auto ex = make_executor(4);
+      AsyncScope scope{*ex};
 
       auto work = [&]() -> Task<void>
       {
         for (int i = 0; i < 20; ++i)
-          co_await ex.yield();
+          co_await ex->yield();
 
         finished.fetch_add(1, std::memory_order_relaxed);
         co_return;
@@ -1011,7 +1011,7 @@ TEST_CASE("stdcolt/coroutines")
         scope.spawn(work());
 
       scope.wait_fence();
-      ex.stop();
+      ex->stop();
     }
 
     CHECK(finished.load(std::memory_order_relaxed) == 64);
@@ -1019,8 +1019,8 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("Tasks can schedule additional tasks while running on executor")
   {
-    ThreadPoolExecutor ex{4};
-    AsyncScope scope{ex};
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
 
     std::atomic<int> inner_counter{0};
     std::atomic<int> outer_started{0};
@@ -1040,7 +1040,7 @@ TEST_CASE("stdcolt/coroutines")
         scope.spawn(inner());
 
       for (int i = 0; i < 5; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       co_return;
     };
@@ -1050,7 +1050,7 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(outer(i));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(outer_started.load(std::memory_order_relaxed) == OUTER);
     CHECK(inner_counter.load(std::memory_order_relaxed) == OUTER * 4);
@@ -1058,8 +1058,8 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("yield allows tasks to make progress under contention")
   {
-    ThreadPoolExecutor ex{4};
-    AsyncScope scope{ex};
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
 
     std::atomic<int> yield_count{0};
 
@@ -1068,7 +1068,7 @@ TEST_CASE("stdcolt/coroutines")
       for (int i = 0; i < 100; ++i)
       {
         yield_count.fetch_add(1, std::memory_order_relaxed);
-        co_await ex.yield();
+        co_await ex->yield();
       }
       co_return;
     };
@@ -1078,29 +1078,29 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(many_yields());
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(yield_count.load(std::memory_order_relaxed) == N * 100);
   }
 
   SUBCASE("Task<int> stress: many values across pool on executor")
   {
-    ThreadPoolExecutor ex{8};
-    AsyncScope scope{ex};
+    auto ex = make_executor(8);
+    AsyncScope scope{*ex};
 
     std::atomic<long long> sum{0};
 
     auto value_task = [&](int v) -> Task<int>
     {
       for (int i = 0; i < 5; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
       co_return v;
     };
 
     auto joiner = [&](Task<int> t) -> Task<void>
     {
       for (int i = 0; i < 3; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       int v = co_await std::move(t);
       sum.fetch_add(v, std::memory_order_relaxed);
@@ -1112,7 +1112,7 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(joiner(value_task(i)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     long long expected = static_cast<long long>(N - 1) * N / 2;
     CHECK(sum.load(std::memory_order_relaxed) == expected);
@@ -1120,8 +1120,8 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("Task<int> stress: values and exceptions on executor")
   {
-    ThreadPoolExecutor ex{8};
-    AsyncScope scope{ex};
+    auto ex = make_executor(8);
+    AsyncScope scope{*ex};
 
     std::atomic<int> success_count{0};
     std::atomic<int> exception_count{0};
@@ -1130,7 +1130,7 @@ TEST_CASE("stdcolt/coroutines")
     auto maybe_throw_task = [&](int v) -> Task<int>
     {
       for (int i = 0; i < 3; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       if (v % 3 == 0)
         throw std::runtime_error("");
@@ -1140,7 +1140,7 @@ TEST_CASE("stdcolt/coroutines")
     auto joiner = [&](Task<int> t) -> Task<void>
     {
       for (int i = 0; i < 2; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       try
       {
@@ -1160,7 +1160,7 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(joiner(maybe_throw_task(i)));
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     int successes  = success_count.load(std::memory_order_relaxed);
     int exceptions = exception_count.load(std::memory_order_relaxed);
@@ -1179,8 +1179,8 @@ TEST_CASE("stdcolt/coroutines")
 
   SUBCASE("Task<void> stress: nested scheduling and yields on executor")
   {
-    ThreadPoolExecutor ex{8};
-    AsyncScope scope{ex};
+    auto ex = make_executor(8);
+    AsyncScope scope{*ex};
 
     std::atomic<int> outer_count{0};
     std::atomic<int> inner_count{0};
@@ -1188,7 +1188,7 @@ TEST_CASE("stdcolt/coroutines")
     auto inner = [&]() -> Task<void>
     {
       for (int i = 0; i < 5; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       inner_count.fetch_add(1, std::memory_order_relaxed);
       co_return;
@@ -1202,7 +1202,7 @@ TEST_CASE("stdcolt/coroutines")
         scope.spawn(inner());
 
       for (int i = 0; i < 10; ++i)
-        co_await ex.yield();
+        co_await ex->yield();
 
       co_return;
     };
@@ -1212,9 +1212,141 @@ TEST_CASE("stdcolt/coroutines")
       scope.spawn(outer());
 
     scope.wait_fence();
-    ex.stop();
+    ex->stop();
 
     CHECK(outer_count.load(std::memory_order_relaxed) == OUTER);
     CHECK(inner_count.load(std::memory_order_relaxed) == OUTER * 4);
+  }
+  SUBCASE("ScheduledThreadPoolExecutor: schedule_at with past deadline fails")
+  {
+    auto ex = make_executor(2, true);
+    AsyncScope scope{*ex};
+
+    std::atomic<Executor::DelayStatus> result{
+        Executor::DelayStatus::DELAY_FAIL_NOT_IMPLEMENTED};
+
+    auto worker = [&]() -> Task<void>
+    {
+      using clock = Executor::clock;
+      using namespace std::chrono_literals;
+
+      auto when = clock::now() - 1ms;
+      auto st   = co_await ex->schedule_at(when);
+      result.store(st, std::memory_order_relaxed);
+      co_return;
+    };
+
+    scope.spawn(worker());
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(
+        result.load(std::memory_order_relaxed)
+        == Executor::DelayStatus::DELAY_FAIL_DEADLINE_PASSED);
+  }
+
+  SUBCASE("ScheduledThreadPoolExecutor: schedule_after delays execution")
+  {
+    auto ex = make_executor(4, true);
+    AsyncScope scope{*ex};
+
+    using clock    = Executor::clock;
+    using duration = Executor::duration;
+    using namespace std::chrono_literals;
+
+    std::atomic<long long> elapsed_ns{0};
+    std::atomic<bool> done{false};
+    std::atomic<Executor::DelayStatus> status{
+        Executor::DelayStatus::DELAY_FAIL_NOT_IMPLEMENTED};
+
+    auto worker = [&]() -> Task<void>
+    {
+      auto delay = 20ms;
+      auto start = clock::now();
+
+      auto st  = co_await ex->schedule_after(delay);
+      auto end = clock::now();
+
+      status.store(st, std::memory_order_relaxed);
+      elapsed_ns.store(
+          std::chrono::duration_cast<std::chrono::nanoseconds>(end - start).count(),
+          std::memory_order_relaxed);
+      done.store(true, std::memory_order_release);
+      co_return;
+    };
+
+    scope.spawn(worker());
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(done.load(std::memory_order_acquire));
+
+    auto st = status.load(std::memory_order_relaxed);
+    CHECK(
+        (st == Executor::DelayStatus::DELAY_SUCCESS
+         || st == Executor::DelayStatus::DELAY_SUCCESS_LATE
+         || st == Executor::DelayStatus::DELAY_SUCCESS_EARLY));
+
+    duration elapsed{
+        std::chrono::nanoseconds(elapsed_ns.load(std::memory_order_relaxed))};
+    CHECK(elapsed >= 20ms);
+  }
+
+  SUBCASE("ScheduledThreadPoolExecutor: tasks fire roughly in deadline order")
+  {
+    auto ex = make_executor(4, true);
+    AsyncScope scope{*ex};
+
+    using namespace std::chrono_literals;
+
+    std::mutex m;
+    std::vector<int> order;
+
+    auto make_task = [&](int id, Executor::duration delay) -> Task<void>
+    {
+      co_await ex->schedule_after(delay);
+      {
+        std::lock_guard<std::mutex> lk(m);
+        order.push_back(id);
+      }
+      co_return;
+    };
+
+    scope.spawn(make_task(0, 5ms));
+    scope.spawn(make_task(1, 10ms));
+    scope.spawn(make_task(2, 15ms));
+
+    scope.wait_fence();
+    ex->stop();
+
+    REQUIRE(order.size() == 3);
+    CHECK(order[0] == 0);
+    CHECK(order[1] == 1);
+    CHECK(order[2] == 2);
+  }
+
+  SUBCASE("Non-scheduler executor: schedule_after reports NOT_IMPLEMENTED")
+  {
+    auto ex = make_executor(2, false);
+    AsyncScope scope{*ex};
+
+    using namespace std::chrono_literals;
+
+    std::atomic<Executor::DelayStatus> result{Executor::DelayStatus::DELAY_SUCCESS};
+
+    auto worker = [&]() -> Task<void>
+    {
+      auto st = co_await ex->schedule_after(1ms);
+      result.store(st, std::memory_order_relaxed);
+      co_return;
+    };
+
+    scope.spawn(worker());
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(
+        result.load(std::memory_order_relaxed)
+        == Executor::DelayStatus::DELAY_FAIL_NOT_IMPLEMENTED);
   }
 }
