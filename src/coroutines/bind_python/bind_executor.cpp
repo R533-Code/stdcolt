@@ -466,5 +466,17 @@ void bind_python_bind_executor(nanobind::module_& m)
 
             PyCoroutineTask task{st};
             scope.spawn(std::move(task));
-          });
+          })
+      .def(
+          "__enter__", [](AsyncScope& scope) -> AsyncScope& { return scope; },
+          nb::rv_policy::reference_internal)
+      .def(
+          "__exit__",
+          [](AsyncScope& scope, nb::handle, nb::handle, nb::handle)
+          {
+            nb::gil_scoped_release release;
+            scope.wait_fence();
+            return false;
+          },
+          nb::arg("exc_type").none(), nb::arg("exc").none(), nb::arg("tb").none());
 }
