@@ -116,9 +116,10 @@ namespace stdcolt::coroutines
       struct awaiter
       {
         Executor* ex;
+        PostStatus status{};
         bool await_ready() const noexcept { return false; }
-        void await_suspend(handle h) const noexcept { ex->post(h); }
-        void await_resume() const noexcept {}
+        void await_suspend(handle h) noexcept { status = ex->post(h); }
+        PostStatus await_resume() const noexcept { return status; }
       };
       return awaiter{this};
     }
