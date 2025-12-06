@@ -62,9 +62,9 @@ ec_add_subdirectory_static("3rd_party/nanobench")
 # ###########################
 ec_namespace(stdcolt)
 
-# all cppcore are prefixed with `stdcolt`
+# all libraries are prefixed with `stdcolt`
 
-# find all the cppcore projects
+# find all the src projects
 file(GLOB_RECURSE all_stdcolt RELATIVE ${CMAKE_CURRENT_SOURCE_DIR}
     "src/*/CMakeLists.txt"
 )
