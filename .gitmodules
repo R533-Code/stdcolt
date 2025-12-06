@@ -19,3 +19,6 @@
 [submodule "3rd_party/concurrentqueue"]
 	path = 3rd_party/concurrentqueue
 	url = https://github.com/cameron314/concurrentqueue.git
+[submodule "src/tracing/3rd_party/tracy"]
+	path = src/tracing/3rd_party/tracy
+	url = https://github.com/wolfpld/tracy.git
