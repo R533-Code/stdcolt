@@ -16,6 +16,8 @@ namespace stdcolt::alloc
   /// @brief Allocator wrapper over `malloc` and `free`.
   /// This allocator does not support extended alignment, use `AlignedMallocator`
   /// for that.
+  /// This allocator is guaranteed stateless: constructor/destructor
+  /// are not required to be called.
   struct Mallocator
   {
     static constexpr AllocatorInfo allocator_info = {
@@ -43,6 +45,8 @@ namespace stdcolt::alloc
   /// This allocator supports extended alignment. If the underlying OS
   /// cannot allocate a block with that specific alignment, `nullblock`
   /// is returned.
+  /// This allocator is guaranteed stateless: constructor/destructor
+  /// are not required to be called.
   struct MallocatorAligned
   {
     static constexpr AllocatorInfo allocator_info = {
