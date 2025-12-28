@@ -70,7 +70,7 @@ namespace stdcolt::ext::rt
   static uint64_t default_phf_lookup(void* storage, Key key) noexcept
   {
     auto ptr = ((default_phf*)storage);
-    auto ret = ptr->find(key);
+    auto ret = ptr->find(to_sv(key));
     if (ret == ptr->end())
       return 0;
     return ret->second;
@@ -80,6 +80,7 @@ namespace stdcolt::ext::rt
   {
     return {
         .phf_sizeof    = sizeof(default_phf),
+        .phf_alignof   = alignof(default_phf),
         .phf_construct = &default_phf_construct,
         .phf_destruct  = &default_phf_destruct,
         .phf_lookup    = &default_phf_lookup,

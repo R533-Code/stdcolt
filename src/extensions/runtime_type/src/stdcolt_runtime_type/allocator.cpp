@@ -13,6 +13,7 @@ namespace stdcolt::ext::rt
   {
     return {
         .allocator_sizeof    = 0,
+        .allocator_alignof = 1,
         .allocator_construct = +[](void*) noexcept { return 0; },
         .allocator_destruct  = +[](void*) noexcept { /* does nothing */ },
         .allocator_alloc =
