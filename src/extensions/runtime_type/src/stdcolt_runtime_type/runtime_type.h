@@ -36,7 +36,7 @@
 namespace stdcolt::ext::rt
 {
   /// @brief Opaque struct managing the lifetimes of types
-  struct RuntimeTypeContext;
+  struct RuntimeContext;
   /// @brief Opaque struct representing the VTable of named types
   struct NamedTypeVTable;
 
@@ -61,8 +61,6 @@ namespace stdcolt::ext::rt
   /// @brief A built-in type
   enum class BuiltInType : uint8_t
   {
-    /// @brief Error type (represents an invalid usage of the API)
-    TYPE_ERROR,
     /// @brief Boolean type
     TYPE_BOOL,
     /// @brief Unsigned 8-bit integer
@@ -91,7 +89,7 @@ namespace stdcolt::ext::rt
     TYPE_CONST_OPAQUE_ADDRESS,
   };
 
-  /// @brief Type descriptor (owned by RuntimeTypeContext)
+  /// @brief Type descriptor (owned by RuntimeContext)
   struct TypeDesc
   {
     /// @brief The type kind
@@ -99,7 +97,11 @@ namespace stdcolt::ext::rt
     /// @brief Unused bits (for now)
     uint64_t _unused : 60;
     /// @brief The context that owns the type
-    RuntimeTypeContext* owner;
+    RuntimeContext* owner;
+    /// @brief The alignment of the type (in bytes)
+    uint32_t type_align;
+    /// @brief The size of the type (in bytes)
+    uint32_t type_size;
     /// @brief Extra data used internally
     void* opaque1;
     /// @brief Extra data used internally
@@ -159,6 +161,123 @@ namespace stdcolt::ext::rt
     Type type;
   };
 
+  /// @brief Result of the creation of a `RuntimeContext`
+  struct RuntimeContextResult
+  {
+    /// @brief The result of the creation
+    enum class ResultKind : uint8_t
+    {
+      /// @brief Successfully created the `RuntimeContext`
+      RT_SUCCESS,
+
+      // parameter checks vvv
+
+      /// @brief Invalid allocator recipe received
+      RT_INVALID_ALLOCATOR,
+      /// @brief Invalid perfect hash function recipe received
+      RT_INVALID_PHF,
+
+      // non-parameter checks, done after parameter checks vvv
+
+      /// @brief Could not allocate necessary memory
+      RT_FAIL_MEMORY,
+      /// @brief Could not bootstrap allocator
+      RT_FAIL_CREATE_ALLOCATOR,
+    };
+    using enum ResultKind;
+
+    /// @brief The result of `rt_create`
+    ResultKind result;
+    union
+    {
+      /// @brief Only active if `result == ResultKind::RT_SUCCESS`.
+      struct
+      {
+        /// @brief The context
+        RuntimeContext* context;
+      } success;
+
+      /// @brief Only active if `result == ResultKind::RT_FAIL_CREATE_ALLOCATOR`.
+      struct
+      {
+        /// @brief Error code returned by the allocator, non-zero
+        int32_t code;
+      } fail_create_allocator;
+    };
+  };
+
+  struct TypeResult
+  {
+    /// @brief The result of the lookup
+    enum class ResultKind : uint8_t
+    {
+      /// @brief Successfully created the type
+      TYPE_SUCCESS,
+
+      // parameter checks vvv
+
+      /// @brief Received an invalid context (nullptr)
+      TYPE_INVALID_CONTEXT,
+      /// @brief Invalid allocator recipe received (named types)
+      TYPE_INVALID_ALLOCATOR,
+      /// @brief Invalid perfect hash function recipe received (named types)
+      TYPE_INVALID_PHF,
+      /// @brief Invalid owner received (owner did not match context)
+      TYPE_INVALID_OWNER,
+      /// @brief Invalid alignment received (owner did not match context)
+      TYPE_INVALID_ALIGN,
+      /// @brief Invalid parameter received, usually nullptr.
+      /// This may also be caused by a different header/compiled version
+      /// mismatch. Always verify ABI versions!
+      TYPE_INVALID_PARAM,
+
+      // non-parameter checks, done after parameter checks vvv
+
+      /// @brief The name of the type is already in use (named types)
+      TYPE_FAIL_EXISTS,
+      /// @brief Could not allocate necessary memory
+      TYPE_FAIL_MEMORY,
+      /// @brief Could not bootstrap allocator (named types)
+      TYPE_FAIL_CREATE_ALLOCATOR,
+      /// @brief Could not bootstrap perfect hash function (named types)
+      TYPE_FAIL_CREATE_PHF,
+    };
+    using enum ResultKind;
+
+    /// @brief The result of the type creation
+    ResultKind result;
+
+    union
+    {
+      /// @brief Only active if `result == ResultKind::TYPE_SUCCESS`.
+      struct
+      {
+        Type type;
+      } success;
+
+      /// @brief Only active if `result == ResultKind::TYPE_FAIL_EXISTS`.
+      struct
+      {
+        /// @brief The existing type
+        Type existing_type;
+      } fail_exists;
+
+      /// @brief Only active if `result == ResultKind::TYPE_FAIL_CREATE_ALLOCATOR`.
+      struct
+      {
+        /// @brief Error code returned by the allocator, non-zero
+        int32_t code;
+      } fail_create_allocator;
+
+      /// @brief Only active if `result == ResultKind::TYPE_FAIL_CREATE_PHF`.
+      struct
+      {
+        /// @brief Error code returned by the allocator, non-zero
+        int32_t code;
+      } fail_create_phf;
+    };
+  };
+
   /// @brief Lookup result
   struct LookupResult
   {
@@ -171,15 +290,16 @@ namespace stdcolt::ext::rt
       /// added to the base address of an object to obtain a valid pointer
       /// to the field.
       LOOKUP_FOUND,
-      /// @brief The lookup was not successful, the type is not a named type.
-      LOOKUP_EXPECTED_NAMED,
-      /// @brief The lookup was not successful, the type does not provide such a member.
-      LOOKUP_NOT_FOUND,
       /// @brief The lookup was not successful, the member did not have the type requested.
       /// The name of the member exist but has another type. The type is stored
       /// in `mismatch_type`.
       LOOKUP_MISMATCH_TYPE,
+      /// @brief The lookup was not successful, the type in which to lookup is not named.
+      LOOKUP_EXPECTED_NAMED,
+      /// @brief The lookup was not successful, the type does not provide such a member.
+      LOOKUP_NOT_FOUND,
     };
+    using enum ResultKind;
 
     /// @brief The result of the lookup
     ResultKind result;
@@ -202,36 +322,37 @@ namespace stdcolt::ext::rt
     };
   };
 
-  /// @brief Creates a RuntimeTypeContext.
+  /// @brief Creates a RuntimeContext.
   /// @param alloc The allocator to use for all VTable allocations
   /// @param phf The default perfect hash function builder to use for named types
-  /// @return nullptr on errors (invalid allocator/perfect hash function builder) or a valid RuntimeTypeContext.
-  /// To prevent memory leaks, use `rt_destroy`.
+  /// @return RuntimeContextResult.
+  /// To prevent memory leaks, use `rt_destroy` on the resulting non-null context.
   STDCOLT_RUNTIME_TYPE_EXPORT
-  RuntimeTypeContext* rt_create(
-      const RecipeAllocator& alloc = default_allocator(),
-      const RecipePerfectHashFunction& phf =
-          default_perfect_hash_function()) noexcept;
+  RuntimeContextResult rt_create(
+      const RecipeAllocator* alloc         = nullptr,
+      const RecipePerfectHashFunction* phf = nullptr) noexcept;
 
   /// @brief Destroys all resources associated with a `RuntimeTypeContext`.
   /// @warning Any usage of the context afterwards causes UB!
   /// @param ctx The context (or nullptr)
   STDCOLT_RUNTIME_TYPE_EXPORT
-  void rt_destroy(RuntimeTypeContext* ctx) noexcept;
+  void rt_destroy(RuntimeContext* ctx) noexcept;
 
   /// @brief Creates a named type from members
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param name The name of the type (those exact bytes should be used to do a lookup)
   /// @param members The members of the type
+  /// @param align The alignment of the type
+  /// @param size The size of the type
   /// @param alloc_override If not null, allocation of instances of this type will use that allocator.
-  /// If this parameter is null, the default allocator of the RuntimeTypeContext is used.
+  /// If this parameter is null, the default allocator of the RuntimeContext is used.
   /// @param phf_override If not null, the perfect hash function of the current type will use that.
-  /// If this parameter is null, the default perfect hash function of the RuntimeTypeContext is used.
+  /// If this parameter is null, the default perfect hash function of the RuntimeContext is used.
   /// @return A Type or an error type on invalid parameters.
   STDCOLT_RUNTIME_TYPE_EXPORT
-  Type rt_type_create(
-      RuntimeTypeContext* ctx, std::span<const char8_t> name,
-      std::span<const Member> members,
+  TypeResult rt_type_create(
+      RuntimeContext* ctx, std::span<const char8_t> name,
+      std::span<const Member> members, uint32_t align, uint32_t size,
       const RecipeAllocator* alloc_override         = nullptr,
       const RecipePerfectHashFunction* phf_override = nullptr) noexcept;
 
@@ -269,7 +390,7 @@ namespace stdcolt::ext::rt
   /// @param type The built-in type kind
   /// @return built-in type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  Type rt_type_create_builtin(RuntimeTypeContext* ctx, BuiltInType type) noexcept;
+  TypeResult rt_type_create_builtin(RuntimeContext* ctx, BuiltInType type) noexcept;
 
   /// @brief Creates a pointer to a type
   /// @param ctx The context that owns the resulting type (not null!)
@@ -277,8 +398,8 @@ namespace stdcolt::ext::rt
   /// @param pointee_is_const If true, the pointer to const
   /// @return pointer type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  Type rt_type_create_ptr(
-      RuntimeTypeContext* ctx, Type pointee, bool pointee_is_const) noexcept;
+  TypeResult rt_type_create_ptr(
+      RuntimeContext* ctx, Type pointee, bool pointee_is_const) noexcept;
 
   /// @brief Creates a function type
   /// @param ctx The context that owns the resulting type (not null!)
@@ -286,24 +407,11 @@ namespace stdcolt::ext::rt
   /// @param args The argument types of the function (none null and all owned by ctx)
   /// @return function type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  Type rt_type_create_fn(
-      RuntimeTypeContext* ctx, Type ret, std::span<const Type> args) noexcept;
+  TypeResult rt_type_create_fn(
+      RuntimeContext* ctx, Type ret, std::span<const Type> args) noexcept;
 
+  /// @brief An opaque type ID, that may be mapped to a `Type`
   using OpaqueTypeID = const void*;
-
-  // TODO: improve me...
-  template<class T>
-  struct opaque_type_tag
-  {
-    static inline const char value = 0;
-  };
-
-  template<typename T>
-  OpaqueTypeID unique_opaque_type_id_for() noexcept
-  {
-    static bool anchor;
-    return &anchor;
-  }
 
   /// @brief Registers a type for a specific opaque type ID
   /// @param ctx The context in which to register
@@ -312,426 +420,46 @@ namespace stdcolt::ext::rt
   /// @return True on success
   STDCOLT_RUNTIME_TYPE_EXPORT
   bool rt_register_set_type(
-      RuntimeTypeContext* ctx, OpaqueTypeID id, Type type) noexcept;
+      RuntimeContext* ctx, OpaqueTypeID id, Type type) noexcept;
 
   /// @brief Returns a type previously registered
   /// @param ctx The context in which to lookup
   /// @param id The opaque ID used on registration
   /// @return The registered type or nullptr
   STDCOLT_RUNTIME_TYPE_EXPORT
-  Type rt_register_get_type(RuntimeTypeContext* ctx, OpaqueTypeID id) noexcept;
+  Type rt_register_get_type(RuntimeContext* ctx, OpaqueTypeID id) noexcept;
 
-  /***********************/
-  // TYPE TAGS
-  /***********************/
-
-  template<class T>
-  struct type_tag
+  /// @brief PreparedMember, obtained through `rt_prepare_member`.
+  /// A prepared member allows even faster lookups than `rt_type_lookup_fast`,
+  /// with the same guarantees (so false positives are possible).
+  /// When accessing the same member multiple times, either cache the obtained
+  /// pointer (this is the fastest), or create and reuse a `PreparedMember`.
+  /// A prepared member is valid for the lifetime of the type it was prepared for.
+  struct PreparedMember
   {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_register_get_type(
-          ctx, unique_opaque_type_id_for<std::remove_cv_t<T>>());
-    }
+    /// @brief The type whose member to access
+    Type owner;
+    /// @brief Expected member type
+    Type expected;
+    /// @brief Internal tag, do not modify!
+    uint64_t tag1;
+    /// @brief Internal tag, do not modify!
+    uint64_t tag2;
   };
 
-  template<class T>
-  Type type_of(RuntimeTypeContext* ctx) noexcept
-  {
-    return type_tag<T>::get(ctx);
-  }
+  /// @brief Creates a prepared member for faster repeated accesses to the same member.
+  /// A prepared member allows faster lookups: use `rt_resolve_prepared_member`.
+  /// @param owner_named The type in which to do the lookups
+  /// @param member_name The member name to lookup (exact same bytes as the one used in `rt_type_create`)
+  /// @param expected_type The expected type of the member
+  /// @return PreparedMember
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  PreparedMember rt_prepare_member(
+      Type owner_named, std::span<const char8_t> member_name,
+      Type expected_type) noexcept;
 
-  template<>
-  struct type_tag<void>
-  {
-    static Type get(RuntimeTypeContext*) noexcept { return nullptr; }
-  };
-
-  template<>
-  struct type_tag<void*>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_OPAQUE_ADDRESS);
-    }
-  };
-
-  template<>
-  struct type_tag<const void*>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_CONST_OPAQUE_ADDRESS);
-    }
-  };
-
-  template<>
-  struct type_tag<bool>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_BOOL);
-    }
-  };
-
-  template<>
-  struct type_tag<uint8_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_U8);
-    }
-  };
-  template<>
-  struct type_tag<uint16_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_U16);
-    }
-  };
-  template<>
-  struct type_tag<uint32_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_U32);
-    }
-  };
-  template<>
-  struct type_tag<uint64_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_U64);
-    }
-  };
-  template<>
-  struct type_tag<int8_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_I8);
-    }
-  };
-  template<>
-  struct type_tag<int16_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_I16);
-    }
-  };
-  template<>
-  struct type_tag<int32_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_I32);
-    }
-  };
-  template<>
-  struct type_tag<int64_t>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_I64);
-    }
-  };
-  template<>
-  struct type_tag<float>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_FLOAT);
-    }
-  };
-  template<>
-  struct type_tag<double>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return rt_type_create_builtin(ctx, BuiltInType::TYPE_DOUBLE);
-    }
-  };
-
-  template<class T>
-  struct type_tag<const T> : type_tag<T>
-  {
-  };
-
-  template<class T>
-  struct type_tag<volatile T> : type_tag<T>
-  {
-  };
-  template<class T>
-  struct type_tag<const volatile T> : type_tag<T>
-  {
-  };
-
-  template<class T>
-  struct type_tag<T&>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept { return type_of<T*>(ctx); }
-  };
-
-  template<class T>
-  struct type_tag<const T&>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      return type_of<const T*>(ctx);
-    }
-  };
-
-  template<class T>
-  struct type_tag<T&&>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept { return type_of<T*>(ctx); }
-  };
-
-  template<class T>
-  struct type_tag<T*>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      if constexpr (std::is_void_v<T>)
-        return type_of<void*>(ctx);
-      else
-        return rt_type_create_ptr(ctx, type_of<T>(ctx), false);
-    }
-  };
-
-  template<class T>
-  struct type_tag<const T*>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept
-    {
-      if constexpr (std::is_void_v<T>)
-        return type_of<void*>(ctx);
-      else
-        return rt_type_create_ptr(ctx, type_of<T>(ctx), true);
-    }
-  };
-
-  template<class R, class... A>
-  struct type_tag<R (*)(A...)>
-  {
-    static Type get(RuntimeTypeContext* ctx) noexcept;
-  };
-
-  template<class R, class... A>
-  Type type_of_fn(RuntimeTypeContext* ctx) noexcept
-  {
-    Type ret    = type_of<R>(ctx);
-    Type argv[] = {type_of<A>(ctx)...};
-    return rt_type_create_fn(ctx, ret, {argv, sizeof...(A)});
-  }
-
-  template<class R, class... A>
-  Type type_tag<R (*)(A...)>::get(RuntimeTypeContext* ctx) noexcept
-  {
-    return type_of_fn<R, A...>(ctx);
-  }
-
-  /***********************/
-  // ABI STABILITY
-  /***********************/
-
-  template<class T>
-  struct abi_param
-  {
-    using type = T;
-  };
-
-  template<class T>
-  struct abi_param<T&>
-  {
-    using type = T*;
-  };
-
-  template<class T>
-  struct abi_param<const T&>
-  {
-    using type = const T*;
-  };
-
-  template<class T>
-  struct abi_param<T&&>
-  {
-    using type = T*;
-  };
-
-  template<class T>
-  using abi_param_t = typename abi_param<T>::type;
-
-  template<class T>
-  decltype(auto) from_abi(abi_param_t<T> v) noexcept
-  {
-    if constexpr (std::is_lvalue_reference_v<T>)
-      return *v;
-    else if constexpr (std::is_rvalue_reference_v<T>)
-      return std::move(*v);
-    else
-      return v;
-  }
-
-  template<class R>
-  struct abi_ret
-  {
-    using type = R;
-  };
-
-  template<class R>
-  struct abi_ret<R&>
-  {
-    using type = R*;
-  };
-
-  template<class R>
-  struct abi_ret<const R&>
-  {
-    using type = const R*;
-  };
-
-  template<class R>
-  using abi_ret_t = typename abi_ret<R>::type;
-
-  template<class R>
-  abi_ret_t<R> to_abi_ret(R&& r) noexcept
-  {
-    if constexpr (std::is_lvalue_reference_v<R> || std::is_rvalue_reference_v<R>)
-      return std::addressof(r);
-    else
-      return static_cast<R&&>(r);
-  }
-
-  /***********************/
-  // C++ BINDINGS
-  /***********************/
-
-  template<auto PMF>
-  struct method_thunk;
-
-  // non-const method
-  template<class C, class R, class... A, R (C::*PMF)(A...)>
-  struct method_thunk<PMF>
-  {
-    using Fn = abi_ret_t<R> (*)(void*, abi_param_t<A>...);
-
-    static abi_ret_t<R> call(void* self, abi_param_t<A>... a) noexcept(
-        noexcept((((C*)self)->*PMF)(from_abi<A>(a)...)))
-    {
-      auto&& r = (((C*)self)->*PMF)(from_abi<A>(a)...);
-      return to_abi_ret<R>(static_cast<R&&>(r));
-    }
-
-    static Type signature(RuntimeTypeContext* ctx) noexcept
-    {
-      return type_of_fn<abi_ret_t<R>, void*, abi_param_t<A>...>(ctx);
-    }
-  };
-
-  template<class C, class R, class... A, R (C::*PMF)(A...) const>
-  struct method_thunk<PMF>
-  {
-    using Fn = abi_ret_t<R> (*)(const void*, abi_param_t<A>...);
-
-    static abi_ret_t<R> call(const void* self, abi_param_t<A>... a) noexcept(
-        noexcept((((const C*)self)->*PMF)(from_abi<A>(a)...)))
-    {
-      auto&& r = (((const C*)self)->*PMF)(from_abi<A>(a)...);
-      return to_abi_ret<R>(static_cast<R&&>(r));
-    }
-
-    static Type signature(RuntimeTypeContext* ctx) noexcept
-    {
-      return type_of_fn<abi_ret_t<R>, const void*, abi_param_t<A>...>(ctx);
-    }
-  };
-
-  template<auto PMF>
-  struct method
-  {
-    std::u8string_view nm;
-    std::u8string_view doc{};
-
-    constexpr method(std::u8string_view n, std::u8string_view d = {})
-        : nm(n)
-        , doc(d)
-    {
-    }
-
-    Member make_member(RuntimeTypeContext* ctx) const noexcept
-    {
-      Member m{};
-      m.name              = {nm.data(), nm.size()};
-      m.description       = {doc.data(), doc.size()};
-      m.address_or_offset = (uintptr_t)(&method_thunk<PMF>::call);
-      m.type              = method_thunk<PMF>::signature(ctx);
-      return m;
-    }
-  };
-
-  template<class Owner, class FieldT, std::size_t Offset>
-  struct field
-  {
-    std::u8string_view nm;
-    std::u8string_view doc{};
-
-    constexpr field(std::u8string_view n, std::u8string_view d = {})
-        : nm(n)
-        , doc(d)
-    {
-    }
-
-    Member make_member(RuntimeTypeContext* ctx) const noexcept
-    {
-      static_assert(
-          std::is_standard_layout_v<Owner>,
-          "offsetof is only supported for standard-layout types");
-
-      Member m{};
-      m.name              = {nm.data(), nm.size()};
-      m.description       = {doc.data(), doc.size()};
-      m.address_or_offset = (uintptr_t)Offset;
-      m.type              = type_of<FieldT>(ctx);
-      return m;
-    }
-  };
-
-  template<class D>
-  concept MemberDescriptor = requires(const D& d, RuntimeTypeContext* ctx) {
-    { d.make_member(ctx) } noexcept -> std::same_as<Member>;
-  };
-
-  template<typename T, MemberDescriptor... Ts>
-  Type bind_type(
-      RuntimeTypeContext* ctx, std::u8string_view name, Ts&&... ts) noexcept
-  {
-    Member members[sizeof...(Ts)]{};
-    std::size_t i = 0;
-    ((members[i++] = ts.make_member(ctx)), ...);
-    auto t =
-        rt_type_create(ctx, {name.data(), name.size()}, {members, sizeof...(Ts)});
-    if (t && t->kind != (uint64_t)TypeKind::KIND_BUILTIN)
-      (void)rt_register_set_type(
-          ctx, unique_opaque_type_id_for<std::remove_cv_t<T>>(), t);
-    return t;
-  }
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  LookupResult rt_resolve_prepared_member(const PreparedMember& pm) noexcept;
 } // namespace stdcolt::ext::rt
-
-#define STDCOLT_RT_FIELD(Owner, member, name_u8, doc_u8)             \
-  ::stdcolt::ext::rt::field<                                         \
-      Owner, decltype(((Owner*)0)->member), offsetof(Owner, member)> \
-  {                                                                  \
-    name_u8, doc_u8                                                  \
-  }
-
-#define STDCOLT_RT_METHOD(Owner, method_name, name_u8, doc_u8) \
-  ::stdcolt::ext::rt::method<&Owner::method_name>              \
-  {                                                            \
-    (name_u8), (doc_u8)                                        \
-  }
 
 #endif
