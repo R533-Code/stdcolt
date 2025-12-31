@@ -230,15 +230,15 @@ namespace stdcolt::ext::rt
 
   static inline uint32_t builtin_sizeof(BuiltInType type) noexcept
   {
-    static constexpr std::array<uint8_t, BUILTIN_COUNT> COUNT = {
+    static constexpr std::array<uint32_t, BUILTIN_COUNT> SIZES = {
         sizeof(bool),     sizeof(uint8_t), sizeof(uint16_t), sizeof(uint32_t),
         sizeof(uint64_t), sizeof(int8_t),  sizeof(int16_t),  sizeof(int32_t),
         sizeof(int64_t),  sizeof(float),   sizeof(double),   sizeof(void*),
         sizeof(void*)};
 
-    if ((size_t)type > BUILTIN_COUNT)
+    if ((size_t)type >= BUILTIN_COUNT)
       return (uint32_t)-1;
-    return COUNT[(size_t)type];
+    return SIZES[(size_t)type];
   }
 
   static inline LookupResult lookup_expected_named() noexcept
@@ -358,8 +358,6 @@ namespace stdcolt::ext::rt
       td.kind_builtin.type = (BuiltInType)i;
       td.type_size         = builtin_sizeof((BuiltInType)i);
       td.type_align        = td.type_size;
-      // ^^^ on 32-bit platforms we still consider 64-bit integers
-      // to be 8-byte aligned for uniformity
     }
 
     return RuntimeContextResult{
