@@ -1,5 +1,6 @@
 #include <doctest/doctest.h>
 #include <stdcolt_runtime_type/runtime_type.h>
+#include <stdcolt_runtime_type/cpp_bindings.h>
 
 using namespace stdcolt::ext::rt;
 
@@ -17,8 +18,9 @@ struct Foo
 
 TEST_CASE("stdcolt/extensions/runtime_type")
 {
-  RuntimeTypeContext* ctx = rt_create();
-  REQUIRE(ctx != nullptr);
+  auto ctx_res = rt_create();
+  REQUIRE(ctx_res.result == RuntimeContextResult::RT_SUCCESS);
+  auto ctx = ctx_res.success.context;
 
   SUBCASE("builtin + pointer constness")
   {
@@ -63,12 +65,13 @@ TEST_CASE("stdcolt/extensions/runtime_type")
 
   SUBCASE("bind_type creates named type with field + method and lookup works")
   {
-    Type ty = bind_type<Foo>(
+    TypeResult ty_res = bind_type<Foo>(
         ctx, u8"Foo", STDCOLT_RT_FIELD(Foo, x, u8"x", u8"field"),
         STDCOLT_RT_METHOD(Foo, add_ref, u8"add_ref", u8"method"),
         STDCOLT_RT_METHOD(Foo, getx, u8"getx", u8"const method"));
 
-    REQUIRE(ty != nullptr);
+    REQUIRE(ty_res.result == TypeResult::TYPE_SUCCESS);
+    auto ty = ty_res.success.type;
     REQUIRE(ty->kind == (uint64_t)TypeKind::KIND_NAMED);
 
     SUBCASE("field lookup returns offsetof")
