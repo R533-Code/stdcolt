@@ -208,7 +208,7 @@ namespace stdcolt::ext::rt
 
   struct TypeResult
   {
-    /// @brief The result of the lookup
+    /// @brief The result of the type creation
     enum class ResultKind : uint8_t
     {
       /// @brief Successfully created the type
@@ -224,7 +224,7 @@ namespace stdcolt::ext::rt
       TYPE_INVALID_PHF,
       /// @brief Invalid owner received (owner did not match context)
       TYPE_INVALID_OWNER,
-      /// @brief Invalid alignment received (owner did not match context)
+      /// @brief Invalid alignment received
       TYPE_INVALID_ALIGN,
       /// @brief Invalid parameter received, usually nullptr.
       /// This may also be caused by a different header/compiled version
@@ -272,7 +272,7 @@ namespace stdcolt::ext::rt
       /// @brief Only active if `result == ResultKind::TYPE_FAIL_CREATE_PHF`.
       struct
       {
-        /// @brief Error code returned by the allocator, non-zero
+        /// @brief Error code returned by the phf, non-zero
         int32_t code;
       } fail_create_phf;
     };
@@ -332,7 +332,7 @@ namespace stdcolt::ext::rt
       const RecipeAllocator* alloc         = nullptr,
       const RecipePerfectHashFunction* phf = nullptr) noexcept;
 
-  /// @brief Destroys all resources associated with a `RuntimeTypeContext`.
+  /// @brief Destroys all resources associated with a `RuntimeContext`.
   /// @warning Any usage of the context afterwards causes UB!
   /// @param ctx The context (or nullptr)
   STDCOLT_RUNTIME_TYPE_EXPORT
@@ -441,9 +441,9 @@ namespace stdcolt::ext::rt
     Type owner;
     /// @brief Expected member type
     Type expected;
-    /// @brief Internal tag, do not modify!
+    /// @brief Index of member (internal tag, do not modify!)
     uint64_t tag1;
-    /// @brief Internal tag, do not modify!
+    /// @brief Hash of member (internal tag, do not modify!)
     uint64_t tag2;
   };
 
