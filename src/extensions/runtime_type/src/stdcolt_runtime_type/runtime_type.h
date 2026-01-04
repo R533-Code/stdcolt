@@ -181,8 +181,10 @@ namespace stdcolt::ext::rt
   {
     /// @brief Keep the layout in the order of declaration
     LAYOUT_AS_DECLARED,
-    /// @brief Use the least amount of space, no guarantee which configuration will be used.
-    LAYOUT_OPTIMAL,
+    /// @brief Try to minimize total size using a fast heuristic.
+    /// Produces near-optimal results in practice but is not guaranteed minimal.
+    /// Current implementation is O(n^2).
+    LAYOUT_OPTIMIZE_SIZE_FAST,
 
     _RuntimeTypeLayout_end,
   };

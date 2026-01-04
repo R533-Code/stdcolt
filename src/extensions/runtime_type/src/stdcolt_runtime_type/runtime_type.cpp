@@ -898,15 +898,111 @@ namespace stdcolt::ext::rt
         size = (uint32_t)align_up_dyn(size, member_align);
         // the updated size is the correct offset
         out_member.address_or_offset = size;
-        
+
         // update the size
         size += member_size;
         // and the alignment to be the max alignment
         align = std::max(align, member_align);
       }
+      // final alignment (needed to support arrays)
+      size = (uint32_t)align_up_dyn(size, align);
     }
-    else if (layout == RuntimeTypeLayout::LAYOUT_OPTIMAL)
+    else if (layout == RuntimeTypeLayout::LAYOUT_OPTIMIZE_SIZE_FAST)
     {
+      try
+      {
+        const size_t n = members.size();
+
+        // remaining indices
+        std::vector<size_t> remaining;
+        remaining.reserve(n);
+        for (size_t i = 0; i < n; ++i)
+          remaining.push_back(i);
+
+        auto member_align = [&](size_t i) { return members[i].type->type_align; };
+        auto member_size  = [&](size_t i) { return members[i].type->type_size; };
+
+        auto padding_if_placed = [&](uint32_t cur_size, size_t i)
+        {
+          const uint32_t a   = member_align(i);
+          const auto aligned = (uint32_t)align_up_dyn(cur_size, a);
+          return aligned - cur_size;
+        };
+
+        // greedy placement: minimize padding at current offset
+        for (size_t out_i = 0; out_i < n; ++out_i)
+        {
+          size_t best_pos = 0;
+          size_t best_idx = remaining[0];
+
+          uint32_t best_pad   = padding_if_placed(size, best_idx);
+          uint32_t best_align = member_align(best_idx);
+          uint32_t best_size  = member_size(best_idx);
+
+          for (size_t pos = 1; pos < remaining.size(); ++pos)
+          {
+            const size_t idx = remaining[pos];
+
+            const uint32_t pad = padding_if_placed(size, idx);
+            const uint32_t a   = member_align(idx);
+            const uint32_t s   = member_size(idx);
+
+            // compare (pad asc), (align desc), (size desc), (index asc)
+            bool better = false;
+            if (pad < best_pad)
+              better = true;
+            else if (pad == best_pad)
+            {
+              if (a > best_align)
+                better = true;
+              else if (a == best_align)
+              {
+                if (s > best_size)
+                  better = true;
+                else if (s == best_size)
+                {
+                  if (idx < best_idx)
+                    better = true;
+                }
+              }
+            }
+
+            if (better)
+            {
+              best_pos   = pos;
+              best_idx   = idx;
+              best_pad   = pad;
+              best_align = a;
+              best_size  = s;
+            }
+          }
+
+          const auto& member = members[best_idx];
+          auto& out_member   = members_ptr[out_i];
+
+          out_member.name        = member.name;
+          out_member.description = member.description;
+          out_member.type        = member.type;
+
+          const uint32_t a = member.type->type_align;
+          const uint32_t s = member.type->type_size;
+
+          size                         = (uint32_t)align_up_dyn(size, a);
+          out_member.address_or_offset = size;
+
+          size += s;
+          align = std::max(align, a);
+
+          remaining[best_pos] = remaining.back();
+          remaining.pop_back();
+        }
+        size = (uint32_t)align_up_dyn(size, align);
+      }
+      catch (...)
+      {
+        delete[] members_ptr;
+        return result_type_fail_mem();
+      }
     }
 
     auto type = rt_type_create(
@@ -962,7 +1058,8 @@ namespace stdcolt::ext::rt
       return lookup_expected_named();
 
     const NamedTypeVTable* vt = type_to_lookup->kind_named.vtable;
-    if (!vt || vt->count_members == 0)
+    STDCOLT_debug_assert(vt != nullptr, "corrupted type");
+    if (vt->count_members == 0)
       return lookup_not_found();
 
     const Key k{(const void*)name.data(), (uint32_t)name.size()};
