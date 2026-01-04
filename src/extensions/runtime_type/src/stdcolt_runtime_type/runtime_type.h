@@ -148,17 +148,43 @@ namespace stdcolt::ext::rt
   /// @brief Shorthand for pointer to `TypeDesc`, pass by value.
   using Type = const TypeDesc*;
 
-  /// @brief A member
+  /// @brief A member, used for `rt_type_create`.
+  /// The difference between `Member` and `MemberInfo` is that
+  /// a `Member` is realized: it has an offset/address.
   struct Member
   {
     /// @brief The name of the member
     std::span<const char8_t> name;
     /// @brief The description of the member
     std::span<const char8_t> description;
-    /// @brief The function address or offset to the member
-    uintptr_t address_or_offset;
     /// @brief The type of the member
     Type type;
+    /// @brief The function address or offset to the member
+    uintptr_t address_or_offset;
+  };
+
+  /// @brief A member information, used for `rt_type_create_runtime`.
+  /// The difference between `Member` and `MemberInfo` is that
+  /// a `MemberInfo` is not realized: it does not have an offset/address.
+  struct MemberInfo
+  {
+    /// @brief The name of the member
+    std::span<const char8_t> name;
+    /// @brief The description of the member
+    std::span<const char8_t> description;
+    /// @brief The type of the member
+    Type type;
+  };
+
+  /// @brief The runtime layout for `rt_type_create_runtime`.
+  enum class RuntimeTypeLayout : uint8_t
+  {
+    /// @brief Keep the layout in the order of declaration
+    LAYOUT_AS_DECLARED,
+    /// @brief Use the least amount of space, no guarantee which configuration will be used.
+    LAYOUT_OPTIMAL,
+
+    _RuntimeTypeLayout_end,
   };
 
   /// @brief Result of the creation of a `RuntimeContext`
@@ -353,6 +379,25 @@ namespace stdcolt::ext::rt
   TypeResult rt_type_create(
       RuntimeContext* ctx, std::span<const char8_t> name,
       std::span<const Member> members, uint32_t align, uint32_t size,
+      const RecipeAllocator* alloc_override         = nullptr,
+      const RecipePerfectHashFunction* phf_override = nullptr) noexcept;
+
+  /// @brief Creates a named type from a list of fields.
+  /// This computes the offsets of the fields at runtime, then
+  /// calls `rt_type_create` with those offsets.
+  /// @param ctx The context that owns the resulting type (not null!)
+  /// @param name The name of the type (those exact bytes should be used to do a lookup)
+  /// @param members The members of the type
+  /// @param layout The layout to use to compute offsets of members
+  /// @param alloc_override If not null, allocation of instances of this type will use that allocator.
+  /// If this parameter is null, the default allocator of the RuntimeContext is used.
+  /// @param phf_override If not null, the perfect hash function of the current type will use that.
+  /// If this parameter is null, the default perfect hash function of the RuntimeContext is used.
+  /// @return A Type or an error type on invalid parameters.
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  TypeResult rt_type_create_runtime(
+      RuntimeContext* ctx, std::span<const char8_t> name,
+      std::span<const MemberInfo> members, RuntimeTypeLayout layout,
       const RecipeAllocator* alloc_override         = nullptr,
       const RecipePerfectHashFunction* phf_override = nullptr) noexcept;
 

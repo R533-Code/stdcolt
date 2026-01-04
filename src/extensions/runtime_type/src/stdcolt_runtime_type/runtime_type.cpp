@@ -79,6 +79,7 @@ namespace stdcolt::ext::rt
 
   static inline uint64_t hash_name(std::span<const char8_t> s) noexcept
   {
+    // TODO: check me
     const size_t len = s.size();
     auto p           = (const uint8_t*)s.data();
 
@@ -861,6 +862,58 @@ namespace stdcolt::ext::rt
       return result_type_fail_mem();
     }
     return result_type_success(td);
+  }
+
+  TypeResult rt_type_create_runtime(
+      RuntimeContext* ctx, std::span<const char8_t> name,
+      std::span<const MemberInfo> members, RuntimeTypeLayout layout,
+      const RecipeAllocator* alloc_override,
+      const RecipePerfectHashFunction* phf_override) noexcept
+  {
+    if (layout >= RuntimeTypeLayout::_RuntimeTypeLayout_end)
+      return result_type_invalid_param();
+
+    uint32_t align   = 1;
+    uint32_t size    = 0;
+    auto members_ptr = new (std::nothrow) Member[members.size()];
+    // verify allocation
+    if (members_ptr == nullptr)
+      return result_type_fail_mem();
+
+    if (layout == RuntimeTypeLayout::LAYOUT_AS_DECLARED)
+    {
+      for (size_t i = 0; i < members.size(); i++)
+      {
+        auto& member     = members[i];
+        auto& out_member = members_ptr[i];
+        // populate common data
+        out_member.name        = member.name;
+        out_member.description = member.description;
+        out_member.type        = member.type;
+
+        auto member_align = member.type->type_align;
+        auto member_size  = member.type->type_size;
+
+        // align up to the next correct boundary
+        size = (uint32_t)align_up_dyn(size, member_align);
+        // the updated size is the correct offset
+        out_member.address_or_offset = size;
+        
+        // update the size
+        size += member_size;
+        // and the alignment to be the max alignment
+        align = std::max(align, member_align);
+      }
+    }
+    else if (layout == RuntimeTypeLayout::LAYOUT_OPTIMAL)
+    {
+    }
+
+    auto type = rt_type_create(
+        ctx, name, {members_ptr, members.size()}, align, size, alloc_override,
+        phf_override);
+    delete[] members_ptr;
+    return type;
   }
 
   static inline bool name_equals(
