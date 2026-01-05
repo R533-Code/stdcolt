@@ -39,19 +39,35 @@ namespace stdcolt::ext::rt
   struct RuntimeContext;
   /// @brief Opaque struct representing the VTable of named types
   struct NamedTypeVTable;
+  // forward declaration
+  struct TypeDesc;
+
+  /// @brief Move function, receives `type`, `out`, `to_move`.
+  /// If null, the `is_trivially_movable` bit marks the type
+  /// as movable or not. A type marked trivially movable has its bits
+  /// copied (using `memcpy` or such).
+  using move_fn_t = void (*)(const TypeDesc*, void*, void*) noexcept;
+  /// @brief Copy function, receives `type`, `out`, `to_copy`.
+  /// If null, the `is_trivially_copyable` bit marks the type
+  /// as copyable or not. A type marked trivially copyable has its bits
+  /// copied (using `memcpy` or such).
+  using copy_fn_t = bool (*)(const TypeDesc*, void*, const void*) noexcept;
+  /// @brief Destroy function, receives `type`, `to_destroy`.
+  /// If null, then the type is assumed to have a trivial destructor,
+  /// meaning that the destructor is a no-op.
+  using destroy_fn_t = void (*)(const TypeDesc*, void*) noexcept;
 
   /// @brief The type kind
   enum class TypeKind : uint8_t
   {
     /// @brief A named type (such as a struct/class)
     KIND_NAMED,
-    /// @brief A builtin type (integers, float, void, and void*).
-    /// `void*` (named opaque address) is a builtin type, it doesn't
-    /// make sense to provide a pointer to void, we only care about the
-    /// address.
+    /// @brief A builtin type (integers, float, and void*).
     KIND_BUILTIN,
     /// @brief A pointer to another type.
     KIND_POINTER,
+    /// @brief A fixed size homogeneous list.
+    KIND_ARRAY,
     /// @brief A function type
     KIND_FUNCTION,
     /// @brief An exception.
@@ -94,24 +110,43 @@ namespace stdcolt::ext::rt
   {
     /// @brief The type kind
     uint64_t kind : 4;
-    /// @brief Unused bits (for now)
-    uint64_t _unused : 60;
+    /// @brief The alignment of the type (in bytes)
+    uint64_t type_align : 32;
+    /// @brief True if the values of the type are trivially movable.
+    /// Trivially movable types can have their storage copied using `memcpy`.
+    uint64_t trivial_movable : 1;
+    /// @brief True if the type provides a move function.
+    /// This is only possible if the type is named.
+    uint64_t has_move_fn : 1;
+    /// @brief True if the values of the type are trivially copyable.
+    /// Trivially copyable types can have their storage copied using `memcpy`.
+    uint64_t trivial_copyable : 1;
+    /// @brief True if the type provides a copy function.
+    /// This is only possible if the type is named.
+    uint64_t has_copy_fn : 1;
+    /// @brief True if the values of the type are trivially destructible.
+    /// Trivially destructible types do not have a destructor, thus destroy is a no-op.
+    /// If the type is not trivially destroyable, it MUST provide a destroy function.
+    /// This is only possible if the type is named.
+    uint64_t trivial_destroy : 1;
+    /// @brief Unused bits  (for now)
+    uint64_t _unused : 23;
+    /// @brief The size of the type (in bytes)
+    uint64_t type_size;
     /// @brief The context that owns the type
     RuntimeContext* owner;
-    /// @brief The alignment of the type (in bytes)
-    uint32_t type_align;
-    /// @brief The size of the type (in bytes)
-    uint32_t type_size;
-    /// @brief Extra data used internally
-    void* opaque1;
-    /// @brief Extra data used internally
-    void* opaque2;
 
     union
     {
       /// @brief Named type info (kind == KIND_NAMED)
       struct
       {
+        /// @brief The move function
+        move_fn_t move_fn;
+        /// @brief The copy function
+        copy_fn_t copy_fn;
+        /// @brief The destroy function
+        destroy_fn_t destroy_fn;
         /// @brief Opaque pointer to vtable for named types
         const NamedTypeVTable* vtable;
       } kind_named;
@@ -123,7 +158,7 @@ namespace stdcolt::ext::rt
         BuiltInType type;
       } kind_builtin;
 
-      /// @brief Builtin type info (kind == KIND_POINTER)
+      /// @brief Pointer type info (kind == KIND_POINTER)
       struct
       {
         /// @brief The type pointed to
@@ -132,7 +167,16 @@ namespace stdcolt::ext::rt
         uint64_t pointee_is_const : 1;
       } kind_pointer;
 
-      /// @brief Builtin type info (kind == KIND_FUNCTION)
+      /// @brief Array type info (kind == KIND_ARRAY)
+      struct
+      {
+        /// @brief The array type
+        const TypeDesc* array_type;
+        /// @brief Size of the array
+        uint64_t size;
+      } kind_array;
+
+      /// @brief Function type info (kind == KIND_FUNCTION)
       struct
       {
         /// @brief The return type of the function or nullptr for void
@@ -143,6 +187,13 @@ namespace stdcolt::ext::rt
         const TypeDesc** argument_types;
       } kind_function;
     };
+
+    // "cold" members, to keep at the end vvv
+
+    /// @brief Extra data used internally
+    void* opaque1;
+    /// @brief Extra data used internally
+    void* opaque2;
   };
 
   /// @brief Shorthand for pointer to `TypeDesc`, pass by value.
@@ -366,12 +417,40 @@ namespace stdcolt::ext::rt
   STDCOLT_RUNTIME_TYPE_EXPORT
   void rt_destroy(RuntimeContext* ctx) noexcept;
 
+  /*****************************/
+  // NAMED AND RUNTIME LAYOUT
+  /*****************************/
+
+  /// @brief Type erased functions to manage the lifetime of an object
+  struct NamedLifetime
+  {
+    /// @brief Move function, receives `type`, `out`, `to_move`.
+    /// If null, the `is_trivially_movable` bit marks the type
+    /// as movable or not. A type marked trivially movable has its bits
+    /// copied (using `memcpy` or such).
+    move_fn_t move_fn;
+    /// @brief Copy function, receives `type`, `out`, `to_copy`.
+    /// If null, the `is_trivially_copyable` bit marks the type
+    /// as copyable or not. A type marked trivially copyable has its bits
+    /// copied (using `memcpy` or such).
+    copy_fn_t copy_fn;
+    /// @brief Destroy function, receives `type`, `to_destroy`.
+    /// If null, then the type is assumed to have a trivial destructor,
+    /// meaning that the destructor is a no-op.
+    destroy_fn_t destroy_fn;
+    /// @brief Only read if `move_fn` is null, marks a type as trivially movable.
+    uint64_t is_trivially_movable : 1;
+    /// @brief Only read if `copy_fn` is null, marks a type as trivially copyable.
+    uint64_t is_trivially_copyable : 1;
+  };
+
   /// @brief Creates a named type from members
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param name The name of the type (those exact bytes should be used to do a lookup)
   /// @param members The members of the type
   /// @param align The alignment of the type
   /// @param size The size of the type
+  /// @param lifetime The functions to manage the lifetime of the instances (not null!)
   /// @param alloc_override If not null, allocation of instances of this type will use that allocator.
   /// If this parameter is null, the default allocator of the RuntimeContext is used.
   /// @param phf_override If not null, the perfect hash function of the current type will use that.
@@ -380,8 +459,8 @@ namespace stdcolt::ext::rt
   STDCOLT_RUNTIME_TYPE_EXPORT
   TypeResult rt_type_create(
       RuntimeContext* ctx, std::span<const char8_t> name,
-      std::span<const Member> members, uint32_t align, uint32_t size,
-      const RecipeAllocator* alloc_override         = nullptr,
+      std::span<const Member> members, uint64_t align, uint64_t size,
+      const NamedLifetime* lifetime, const RecipeAllocator* alloc_override = nullptr,
       const RecipePerfectHashFunction* phf_override = nullptr) noexcept;
 
   /// @brief Creates a named type from a list of fields.
@@ -432,6 +511,10 @@ namespace stdcolt::ext::rt
       Type type_to_lookup, std::span<const char8_t> name,
       Type expected_type) noexcept;
 
+  /*****************************/
+  // BUILTIN TYPES
+  /*****************************/
+
   /// @brief Creates a builtin type
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param type The built-in type kind
@@ -448,6 +531,15 @@ namespace stdcolt::ext::rt
   TypeResult rt_type_create_ptr(
       RuntimeContext* ctx, Type pointee, bool pointee_is_const) noexcept;
 
+  /// @brief Creates an array of a type
+  /// @param ctx The context that owns the resulting type (not null!)
+  /// @param type The type of the array (not null!)
+  /// @param size The size of the array
+  /// @return array type
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  TypeResult rt_type_create_array(
+      RuntimeContext* ctx, Type type, uint64_t size) noexcept;
+
   /// @brief Creates a function type
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param ret The return of the function or null for function that return nothing
@@ -456,6 +548,10 @@ namespace stdcolt::ext::rt
   STDCOLT_RUNTIME_TYPE_EXPORT
   TypeResult rt_type_create_fn(
       RuntimeContext* ctx, Type ret, std::span<const Type> args) noexcept;
+
+  /*****************************/
+  // OPAQUE TYPE IDs
+  /*****************************/
 
   /// @brief An opaque type ID, that may be mapped to a `Type`
   using OpaqueTypeID = const void*;
@@ -475,6 +571,10 @@ namespace stdcolt::ext::rt
   /// @return The registered type or nullptr
   STDCOLT_RUNTIME_TYPE_EXPORT
   Type rt_register_get_type(RuntimeContext* ctx, OpaqueTypeID id) noexcept;
+
+  /*****************************/
+  // PREPARED MEMBER
+  /*****************************/
 
   /// @brief PreparedMember, obtained through `rt_prepare_member`.
   /// A prepared member allows even faster lookups than `rt_type_lookup_fast`,
@@ -505,8 +605,89 @@ namespace stdcolt::ext::rt
       Type owner_named, std::span<const char8_t> member_name,
       Type expected_type) noexcept;
 
+  /// @brief Resolves a lookup from a prepared member
+  /// @param pm The prepared member, obtained from `rt_prepare_member`.
+  /// @return LookupResult
   STDCOLT_RUNTIME_TYPE_EXPORT
   LookupResult rt_resolve_prepared_member(const PreparedMember& pm) noexcept;
+
+  /*****************************/
+  // VALUE AND LIFETIME
+  /*****************************/
+
+  /// @brief Header of all values
+  struct ValueHeader
+  {
+    /// @brief Type of the value or nullptr for empty Value.
+    /// Do not modify manually!
+    Type type;
+    /// @brief Pointer to the value, which is either inline or on the heap.
+    /// This address is used to avoid branching. Do not modify manually!
+    /// @pre Must never be null of type is not null.
+    void* address;
+  };
+
+  /// @brief Alignment (in bytes) of inline buffer of `Value`.
+  /// @warning Modification causes an ABI break!
+  static constexpr size_t VALUE_SBO_ALIGN = alignof(ValueHeader);
+  /// @brief Size (in bytes) of inline buffer of `Value`.
+  /// @warning Modification causes an ABI break!
+  static constexpr size_t VALUE_SBO_SIZE = 128 - sizeof(ValueHeader);
+
+  /// @brief Runtime value of any time
+  struct Value
+  {
+    /// @brief Common header for all Value, may be read without methods.
+    /// Write to any of its member is UB.
+    ValueHeader header;
+
+    /// @brief Inline buffer used for Small Buffer Optimization (SBO).
+    /// Accessing (read/write) is UB, only use methods!
+    alignas(VALUE_SBO_ALIGN) uint8_t inline_buffer[VALUE_SBO_SIZE];
+  };
+
+  /// @brief Initialize the storage of a `Value` for a specific type.
+  /// This function does not initialize the stored value: this is not
+  /// a constructor call, this is a storage allocation. Initialization
+  /// of the storage must be done through `header.address` if this function
+  /// returns true.
+  /// @param out The value to initialize (out param)
+  /// @param type The type to store in the value or null for empty
+  /// @return True on success, else failure
+  /// @pre `out` may not be null, else UB!
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  bool val_construct(Value* out, Type type) noexcept;
+
+  /// @brief Constructs an empty `Value`.
+  /// Empty values do not need to be destroyed, and have `header.type == null`.
+  /// This is guaranteed to not allocate, and always succeed.
+  /// @param out The value to initialize
+  /// @pre No parameter may be null, else UB!
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  void val_construct_empty(Value* out) noexcept;
+
+  /// @brief Constructs a `Value` by stealing the storage from another `Value`.
+  /// The moved-from value is marked empty, as if initialized by `val_construct_empty`.
+  /// @param out The value to initialize (out param)
+  /// @param to_move `Value` from which to steal the storage, marked empty after the call
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  void val_construct_from_move(Value* out, Value* to_move) noexcept;
+
+  /// @brief Tries to copy a `Value` to another.
+  /// For a copy to be successful, the type stored in `to_copy` must support
+  /// being copied, and storage allocation (if needed) should succeed.
+  /// On failure, `out` is marked empty, as if initialized by `val_construct_empty`.
+  /// @param out The value to copy
+  /// @param to_copy `Value` to copy.
+  /// @return True on success, false on failure
+  /// @pre No parameter may be null, else UB!
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  bool val_construct_from_copy(Value* out, const Value* to_copy) noexcept;
+
+  /// @brief Destroys the stored value then the storage of a Value.
+  /// @param val Value to destroy (or null), marked empty afterwards
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  void val_destroy(Value* val) noexcept;
 } // namespace stdcolt::ext::rt
 
 #endif

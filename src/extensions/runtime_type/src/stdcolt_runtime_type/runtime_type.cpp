@@ -23,7 +23,7 @@ namespace stdcolt::ext::rt
 
   static inline bool is_pow2(size_t n) noexcept
   {
-    return (n & (n - 1)) == 0;
+    return n != 0 && (n & (n - 1)) == 0;
   }
 
   static inline size_t align_up_dyn(size_t v, size_t align) noexcept
@@ -206,25 +206,43 @@ namespace stdcolt::ext::rt
       bool pointee_const;
     };
 
-    struct ptrkey_hash
+    struct ArrayKey
+    {
+      Type pointee;
+      uint64_t size;
+    };
+
+    struct KeyHash
     {
       size_t operator()(const PtrKey& k) const noexcept
       {
-        uint64_t h = mix64((uint64_t)(uintptr_t)k.pointee);
+        uint64_t h = mix64((uint64_t)k.pointee);
         h ^= mix64((uint64_t)k.pointee_const);
-        return (size_t)h;
+        return h;
+      }
+
+      size_t operator()(const ArrayKey& k) const noexcept
+      {
+        uint64_t h = mix64((uint64_t)k.pointee);
+        h ^= mix64(k.size);
+        return h;
       }
     };
 
-    struct ptrkey_eq
+    struct KeyEq
     {
       bool operator()(const PtrKey& a, const PtrKey& b) const noexcept
       {
         return a.pointee == b.pointee && a.pointee_const == b.pointee_const;
       }
+      bool operator()(const ArrayKey& a, const ArrayKey& b) const noexcept
+      {
+        return a.pointee == b.pointee && a.size == b.size;
+      }
     };
 
-    std::unordered_map<PtrKey, TypeDesc*, ptrkey_hash, ptrkey_eq> pointer_types;
+    std::unordered_map<PtrKey, TypeDesc*, KeyHash, KeyEq> pointer_types;
+    std::unordered_map<ArrayKey, TypeDesc*, KeyHash, KeyEq> array_types;
     std::unordered_map<uint64_t, TypeDesc*> function_buckets;
     std::atomic<uint64_t> type_id_generator{1};
   };
@@ -354,6 +372,11 @@ namespace stdcolt::ext::rt
       td.kind              = (uint64_t)TypeKind::KIND_BUILTIN;
       td._unused           = 0;
       td.owner             = ctx;
+      td.trivial_copyable  = true;
+      td.trivial_movable   = true;
+      td.trivial_destroy   = true;
+      td.has_move_fn       = false;
+      td.has_copy_fn       = false;
       td.opaque1           = nullptr;
       td.opaque2           = nullptr;
       td.kind_builtin.type = (BuiltInType)i;
@@ -397,6 +420,15 @@ namespace stdcolt::ext::rt
       dealloc_from_ctx(ctx, (void*)td, sizeof(TypeDesc));
     }
     ctx->pointer_types.clear();
+
+    // destroy array types
+    for (auto& kv : ctx->array_types)
+    {
+      TypeDesc* td = kv.second;
+      STDCOLT_debug_assert(td != nullptr, "corrupted array_types");
+      dealloc_from_ctx(ctx, (void*)td, sizeof(TypeDesc));
+    }
+    ctx->array_types.clear();
 
     // destroy function types
     for (auto& kv : ctx->function_buckets)
@@ -513,20 +545,72 @@ namespace stdcolt::ext::rt
     if (!td)
       return result_type_fail_mem();
 
-    td->kind       = (uint64_t)TypeKind::KIND_POINTER;
-    td->_unused    = 0;
-    td->owner      = ctx;
-    td->opaque1    = nullptr;
-    td->opaque2    = nullptr;
-    td->type_size  = sizeof(void*);
-    td->type_align = alignof(void*);
+    td->kind             = (uint64_t)TypeKind::KIND_POINTER;
+    td->_unused          = 0;
+    td->owner            = ctx;
+    td->trivial_copyable = true;
+    td->trivial_movable  = true;
+    td->trivial_destroy  = true;
+    td->has_move_fn      = false;
+    td->has_copy_fn      = false;
+    td->opaque1          = nullptr;
+    td->opaque2          = nullptr;
+    td->type_size        = sizeof(void*);
+    td->type_align       = alignof(void*);
 
     td->kind_pointer.pointee_type     = pointee;
-    td->kind_pointer.pointee_is_const = pointee_is_const ? 1 : 0;
+    td->kind_pointer.pointee_is_const = (uint64_t)pointee_is_const;
 
     try
     {
       ctx->pointer_types.try_emplace(key, td);
+    }
+    catch (...)
+    {
+      dealloc_from_ctx(ctx, (void*)td, sizeof(TypeDesc));
+      return result_type_fail_mem();
+    }
+    return result_type_success(td);
+  }
+
+  TypeResult rt_type_create_array(
+      RuntimeContext* ctx, Type type, uint64_t size) noexcept
+  {
+    if (!ctx)
+      return result_type_invalid_context();
+    if (!type)
+      return result_type_invalid_param();
+    if (type->owner != ctx)
+      return result_type_invalid_owner();
+
+    RuntimeContext::ArrayKey key{type, size};
+    if (auto it = ctx->array_types.find(key); it != ctx->array_types.end())
+      return result_type_success(it->second);
+
+    TypeDesc* td = alloc_from_ctx(ctx, sizeof(TypeDesc), alignof(TypeDesc));
+    if (!td)
+      return result_type_fail_mem();
+
+    td->kind             = (uint64_t)TypeKind::KIND_ARRAY;
+    td->trivial_copyable = type->trivial_copyable;
+    td->trivial_movable  = type->trivial_movable;
+    td->trivial_destroy  = type->trivial_destroy;
+    td->has_move_fn      = type->has_move_fn;
+    td->has_copy_fn      = type->has_copy_fn;
+    td->_unused          = 0;
+    td->owner            = ctx;
+    td->opaque1          = nullptr;
+    td->opaque2          = nullptr;
+    // TODO: handle overflow
+    td->type_size  = type->type_size * size;
+    td->type_align = type->type_align;
+
+    td->kind_array.array_type = type;
+    td->kind_array.size       = size;
+
+    try
+    {
+      ctx->array_types.try_emplace(key, td);
     }
     catch (...)
     {
@@ -549,6 +633,8 @@ namespace stdcolt::ext::rt
   {
     if (!ctx)
       return result_type_invalid_context();
+    if (ret && ret->owner != ctx)
+      return result_type_invalid_owner();
     // only check arguments: a nullptr return represents a void return
     for (size_t i = 0; i < args.size(); ++i)
     {
@@ -598,11 +684,16 @@ namespace stdcolt::ext::rt
     if (!td)
       return result_type_fail_mem();
 
-    td->kind       = (uint64_t)TypeKind::KIND_FUNCTION;
-    td->_unused    = 0;
-    td->owner      = ctx;
-    td->type_size  = sizeof(void*);
-    td->type_align = alignof(void*);
+    td->kind             = (uint64_t)TypeKind::KIND_FUNCTION;
+    td->_unused          = 0;
+    td->trivial_copyable = true;
+    td->trivial_movable  = true;
+    td->trivial_destroy  = true;
+    td->has_move_fn      = false;
+    td->has_copy_fn      = false;
+    td->owner            = ctx;
+    td->type_size        = sizeof(void*);
+    td->type_align       = alignof(void*);
 
     // store chaining + tag in opaque fields
     td->opaque2 = (void*)tag;
@@ -637,10 +728,11 @@ namespace stdcolt::ext::rt
 
   TypeResult rt_type_create(
       RuntimeContext* ctx, std::span<const char8_t> name,
-      std::span<const Member> members, uint32_t align, uint32_t size,
-      const RecipeAllocator* alloc_override,
+      std::span<const Member> members, uint64_t align, uint64_t size,
+      const NamedLifetime* lifetime, const RecipeAllocator* alloc_override,
       const RecipePerfectHashFunction* phf_override) noexcept
   {
+    // TODO: handle align up size to alignment...
     if (!ctx)
       return result_type_invalid_context();
 
@@ -648,6 +740,8 @@ namespace stdcolt::ext::rt
       return result_type_invalid_alloc();
     if (!phf_recipe_valid(ctx->default_phf_recipe))
       return result_type_invalid_phf();
+    if (lifetime == nullptr)
+      return result_type_invalid_param();
     if (align == 0 || !is_pow2(align))
       return result_type_invalid_align();
 
@@ -739,14 +833,24 @@ namespace stdcolt::ext::rt
     auto vtbase   = base_all + vtable_off;
     auto* vt      = (NamedTypeVTable*)vtbase;
 
-    td->kind              = (uint64_t)TypeKind::KIND_NAMED;
-    td->_unused           = 0;
-    td->owner             = ctx;
-    td->type_size         = size;
-    td->type_align        = align;
-    td->opaque1           = nullptr;
-    td->opaque2           = nullptr;
-    td->kind_named.vtable = vt;
+    td->kind    = (uint64_t)TypeKind::KIND_NAMED;
+    td->_unused = 0;
+    td->owner   = ctx;
+    td->trivial_copyable =
+        lifetime->copy_fn == nullptr && (bool)lifetime->is_trivially_copyable;
+    td->trivial_movable =
+        lifetime->move_fn == nullptr && (bool)lifetime->is_trivially_movable;
+    td->trivial_destroy       = lifetime->destroy_fn == nullptr;
+    td->has_move_fn           = lifetime->move_fn != nullptr;
+    td->has_copy_fn           = lifetime->copy_fn != nullptr;
+    td->type_size             = size;
+    td->type_align            = align;
+    td->opaque1               = nullptr;
+    td->opaque2               = nullptr;
+    td->kind_named.vtable     = vt;
+    td->kind_named.copy_fn    = lifetime->copy_fn;
+    td->kind_named.move_fn    = lifetime->move_fn;
+    td->kind_named.destroy_fn = lifetime->destroy_fn;
 
     // vtable header
     vt->allocation_size = total_size;
@@ -770,8 +874,7 @@ namespace stdcolt::ext::rt
     bool alloc_constructed = false;
     if (has_alloc_override)
     {
-      auto code = type_alloc.allocator_construct(type_alloc_state);
-      if (code != 0)
+      if (auto code = type_alloc.allocator_construct(type_alloc_state); code != 0)
       {
         dealloc_from_ctx(ctx, (void*)td, total_size);
         return result_type_fail_create_allocator(code);
@@ -864,6 +967,353 @@ namespace stdcolt::ext::rt
     return result_type_success(td);
   }
 
+  static inline void rt_destroy_any(Type t, void* obj) noexcept;
+
+  static inline void rt_move_any(Type t, void* dst, void* src) noexcept
+  {
+    if (t->trivial_movable)
+    {
+      std::memcpy(dst, src, t->type_size);
+      return;
+    }
+
+    switch_no_default((TypeKind)t->kind)
+    {
+    case TypeKind::KIND_NAMED:
+    {
+      STDCOLT_debug_assert(
+          t->has_move_fn && t->kind_named.move_fn, "type not movable");
+      t->kind_named.move_fn(t, dst, src);
+      return;
+    }
+
+    case TypeKind::KIND_ARRAY:
+    {
+      Type elem        = t->kind_array.array_type;
+      const uint64_t n = t->kind_array.size;
+
+      const auto d      = (uint8_t*)dst;
+      const auto s      = (uint8_t*)src;
+      const auto stride = elem->type_size;
+
+      for (uint64_t i = 0; i < n; ++i)
+        rt_move_any(elem, d + i * stride, s + i * stride);
+      return;
+    }
+    }
+  }
+
+  static inline bool rt_copy_any(Type t, void* dst, const void* src) noexcept
+  {
+    if (t->trivial_copyable)
+    {
+      std::memcpy(dst, src, t->type_size);
+      return true;
+    }
+
+    switch_no_default((TypeKind)t->kind)
+    {
+    case TypeKind::KIND_NAMED:
+    {
+      STDCOLT_debug_assert(
+          t->has_copy_fn && t->kind_named.copy_fn, "type not copyable");
+      return t->kind_named.copy_fn(t, dst, src);
+    }
+    case TypeKind::KIND_ARRAY:
+    {
+      Type elem        = t->kind_array.array_type;
+      const uint64_t n = t->kind_array.size;
+
+      const auto d      = (uint8_t*)dst;
+      const auto s      = (const uint8_t*)src;
+      const auto stride = elem->type_size;
+
+      uint64_t i = 0;
+      for (; i < n; ++i)
+      {
+        if (!rt_copy_any(elem, d + i * stride, s + i * stride))
+        {
+          // rollback already-copied elements
+          for (uint64_t j = 0; j < i; ++j)
+            rt_destroy_any(elem, d + j * stride);
+          return false;
+        }
+      }
+      return true;
+    }
+    }
+  }
+
+  static inline void rt_destroy_any(Type t, void* obj) noexcept
+  {
+    if (t->trivial_destroy)
+      return;
+
+    switch_no_default((TypeKind)t->kind)
+    {
+    case TypeKind::KIND_NAMED:
+      STDCOLT_debug_assert(
+          t->kind_named.destroy_fn, "non-trivial destroy without fn");
+      t->kind_named.destroy_fn(t, obj);
+      return;
+
+    case TypeKind::KIND_ARRAY:
+    {
+      Type elem         = t->kind_array.array_type;
+      const auto p      = (uint8_t*)obj;
+      const uint64_t n  = t->kind_array.size;
+      const auto stride = elem->type_size;
+
+      for (uint64_t i = 0; i < n; ++i)
+        rt_destroy_any(elem, p + i * stride);
+      return;
+    }
+    }
+  }
+
+  static void rt_runtime_named_move(
+      const TypeDesc* self, void* out, void* src) noexcept
+  {
+    STDCOLT_debug_assert(
+        self && self->kind == (uint64_t)TypeKind::KIND_NAMED, "invalid param");
+    const NamedTypeVTable* vt = self->kind_named.vtable;
+    STDCOLT_debug_assert(vt != nullptr, "corrupted named type");
+
+    auto entries = vt->entries();
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+      const auto& e = entries[i];
+      uint8_t* d    = (uint8_t*)out + e.address_or_offset;
+      uint8_t* s    = (uint8_t*)src + e.address_or_offset;
+      rt_move_any(e.type, d, s);
+    }
+  }
+  static bool rt_runtime_named_copy(
+      const TypeDesc* self, void* out, const void* src) noexcept
+  {
+    STDCOLT_debug_assert(
+        self && self->kind == (uint64_t)TypeKind::KIND_NAMED, "invalid param");
+    const NamedTypeVTable* vt = self->kind_named.vtable;
+    STDCOLT_debug_assert(vt != nullptr, "corrupted named type");
+
+    auto entries = vt->entries();
+    // copy in order, rollback by destroying already-copied
+    for (size_t i = 0; i < entries.size(); ++i)
+    {
+      const auto& e = entries[i];
+      const auto d  = (uint8_t*)out + e.address_or_offset;
+      const auto s  = (const uint8_t*)src + e.address_or_offset;
+
+      if (!rt_copy_any(e.type, d, s))
+      {
+        for (size_t j = 0; j < i; ++j)
+        {
+          const auto& ej = entries[j];
+          uint8_t* dj    = (uint8_t*)out + ej.address_or_offset;
+          rt_destroy_any(ej.type, dj);
+        }
+        return false;
+      }
+    }
+    return true;
+  }
+  static void rt_runtime_named_destroy(const TypeDesc* self, void* obj) noexcept
+  {
+    STDCOLT_debug_assert(
+        self && self->kind == (uint64_t)TypeKind::KIND_NAMED, "invalid param");
+    const NamedTypeVTable* vt = self->kind_named.vtable;
+    STDCOLT_debug_assert(vt != nullptr, "corrupted named type");
+
+    auto entries = vt->entries();
+    // destroy in reverse order
+    for (size_t i = entries.size(); i-- > 0;)
+    {
+      const auto& e = entries[i];
+      // TODO: verify that offset not address
+      uint8_t* p = (uint8_t*)obj + e.address_or_offset;
+      rt_destroy_any(e.type, p);
+    }
+  }
+
+  struct LifetimeAggregator
+  {
+    bool all_triv_move    = true;
+    bool all_move         = true;
+    bool all_triv_copy    = true;
+    bool all_copy         = true;
+    bool all_triv_destroy = true;
+
+    void add(Type t) noexcept
+    {
+      all_triv_move = all_triv_move && t->trivial_movable;
+      all_move      = all_move && (t->trivial_movable || t->has_move_fn);
+
+      all_triv_copy = all_triv_copy && t->trivial_copyable;
+      all_copy      = all_copy && (t->trivial_copyable || t->has_copy_fn);
+
+      all_triv_destroy = all_triv_destroy && t->trivial_destroy;
+    }
+
+    void finalize(NamedLifetime& out) const noexcept
+    {
+      out.is_trivially_movable  = all_triv_move ? 1 : 0;
+      out.is_trivially_copyable = all_triv_copy ? 1 : 0;
+
+      out.move_fn =
+          all_triv_move ? nullptr : (all_move ? &rt_runtime_named_move : nullptr);
+      out.copy_fn =
+          all_triv_copy ? nullptr : (all_copy ? &rt_runtime_named_copy : nullptr);
+
+      out.destroy_fn = all_triv_destroy ? nullptr : &rt_runtime_named_destroy;
+    }
+  };
+
+  void rt_type_create_runtime_as_declared(
+      NamedLifetime& lifetime, uint64_t& align, uint64_t& size, Member* out,
+      std::span<const MemberInfo> members) noexcept
+  {
+    LifetimeAggregator lt;
+    for (size_t i = 0; i < members.size(); i++)
+    {
+      auto& member     = members[i];
+      auto& out_member = out[i];
+
+      // to compute trivialness
+      lt.add(member.type);
+      // populate common data
+      out_member.name        = member.name;
+      out_member.description = member.description;
+      out_member.type        = member.type;
+
+      auto member_align = member.type->type_align;
+      auto member_size  = member.type->type_size;
+
+      // align up to the next correct boundary
+      size = align_up_dyn(size, member_align);
+      // the updated size is the correct offset
+      out_member.address_or_offset = size;
+
+      // update the size
+      size += member_size;
+      // and the alignment to be the max alignment
+      align = std::max(align, member_align);
+    }
+    // final alignment (needed to support arrays)
+    size = align_up_dyn(size, align);
+
+    // initialize lifetime
+    lt.finalize(lifetime);
+  }
+
+  bool rt_type_create_runtime_optimize_size_fast(
+      NamedLifetime& lifetime, uint64_t& align, uint64_t& size, Member* out,
+      std::span<const MemberInfo> members) noexcept
+  {
+    try
+    {
+      LifetimeAggregator lt;
+      const size_t n = members.size();
+
+      // remaining indices
+      std::vector<size_t> remaining;
+      remaining.reserve(n);
+      for (size_t i = 0; i < n; ++i)
+        remaining.push_back(i);
+
+      auto member_align = [&](size_t i) { return members[i].type->type_align; };
+      auto member_size  = [&](size_t i) { return members[i].type->type_size; };
+
+      auto padding_if_placed = [&](uint64_t cur_size, size_t i)
+      {
+        const auto a       = member_align(i);
+        const auto aligned = align_up_dyn(cur_size, a);
+        return aligned - cur_size;
+      };
+
+      // greedy placement: minimize padding at current offset
+      for (size_t out_i = 0; out_i < n; ++out_i)
+      {
+        size_t best_pos = 0;
+        size_t best_idx = remaining[0];
+
+        uint64_t best_pad   = padding_if_placed(size, best_idx);
+        uint64_t best_align = member_align(best_idx);
+        uint64_t best_size  = member_size(best_idx);
+
+        for (size_t pos = 1; pos < remaining.size(); ++pos)
+        {
+          const size_t idx = remaining[pos];
+
+          const uint64_t pad = padding_if_placed(size, idx);
+          const uint64_t a   = member_align(idx);
+          const uint64_t s   = member_size(idx);
+
+          // compare (pad asc), (align desc), (size desc), (index asc)
+          bool better = false;
+          if (pad < best_pad)
+            better = true;
+          else if (pad == best_pad)
+          {
+            if (a > best_align)
+              better = true;
+            else if (a == best_align)
+            {
+              if (s > best_size)
+                better = true;
+              else if (s == best_size)
+              {
+                if (idx < best_idx)
+                  better = true;
+              }
+            }
+          }
+
+          if (better)
+          {
+            best_pos   = pos;
+            best_idx   = idx;
+            best_pad   = pad;
+            best_align = a;
+            best_size  = s;
+          }
+        }
+
+        const auto& member = members[best_idx];
+        auto& out_member   = out[out_i];
+
+        out_member.name        = member.name;
+        out_member.description = member.description;
+        out_member.type        = member.type;
+
+        // to compute trivialness
+        lt.add(member.type);
+
+        const auto a = member.type->type_align;
+        const auto s = member.type->type_size;
+
+        size                         = (uint32_t)align_up_dyn(size, a);
+        out_member.address_or_offset = size;
+
+        size += s;
+        align = std::max(align, a);
+
+        remaining[best_pos] = remaining.back();
+        remaining.pop_back();
+      }
+      size = align_up_dyn(size, align);
+
+      // initialize lifetime
+      lt.finalize(lifetime);
+
+      return true;
+    }
+    catch (...)
+    {
+      // allocation failure
+      return false;
+    }
+  }
+
   TypeResult rt_type_create_runtime(
       RuntimeContext* ctx, std::span<const char8_t> name,
       std::span<const MemberInfo> members, RuntimeTypeLayout layout,
@@ -873,132 +1323,24 @@ namespace stdcolt::ext::rt
     if (layout >= RuntimeTypeLayout::_RuntimeTypeLayout_end)
       return result_type_invalid_param();
 
-    uint32_t align   = 1;
-    uint32_t size    = 0;
+    uint64_t align   = 1;
+    uint64_t size    = 0;
     auto members_ptr = new (std::nothrow) Member[members.size()];
     // verify allocation
     if (members_ptr == nullptr)
       return result_type_fail_mem();
 
+    NamedLifetime lt{};
     if (layout == RuntimeTypeLayout::LAYOUT_AS_DECLARED)
     {
-      for (size_t i = 0; i < members.size(); i++)
-      {
-        auto& member     = members[i];
-        auto& out_member = members_ptr[i];
-        // populate common data
-        out_member.name        = member.name;
-        out_member.description = member.description;
-        out_member.type        = member.type;
-
-        auto member_align = member.type->type_align;
-        auto member_size  = member.type->type_size;
-
-        // align up to the next correct boundary
-        size = (uint32_t)align_up_dyn(size, member_align);
-        // the updated size is the correct offset
-        out_member.address_or_offset = size;
-
-        // update the size
-        size += member_size;
-        // and the alignment to be the max alignment
-        align = std::max(align, member_align);
-      }
-      // final alignment (needed to support arrays)
-      size = (uint32_t)align_up_dyn(size, align);
+      // cannot fail
+      rt_type_create_runtime_as_declared(lt, align, size, members_ptr, members);
     }
     else if (layout == RuntimeTypeLayout::LAYOUT_OPTIMIZE_SIZE_FAST)
     {
-      try
-      {
-        const size_t n = members.size();
-
-        // remaining indices
-        std::vector<size_t> remaining;
-        remaining.reserve(n);
-        for (size_t i = 0; i < n; ++i)
-          remaining.push_back(i);
-
-        auto member_align = [&](size_t i) { return members[i].type->type_align; };
-        auto member_size  = [&](size_t i) { return members[i].type->type_size; };
-
-        auto padding_if_placed = [&](uint32_t cur_size, size_t i)
-        {
-          const uint32_t a   = member_align(i);
-          const auto aligned = (uint32_t)align_up_dyn(cur_size, a);
-          return aligned - cur_size;
-        };
-
-        // greedy placement: minimize padding at current offset
-        for (size_t out_i = 0; out_i < n; ++out_i)
-        {
-          size_t best_pos = 0;
-          size_t best_idx = remaining[0];
-
-          uint32_t best_pad   = padding_if_placed(size, best_idx);
-          uint32_t best_align = member_align(best_idx);
-          uint32_t best_size  = member_size(best_idx);
-
-          for (size_t pos = 1; pos < remaining.size(); ++pos)
-          {
-            const size_t idx = remaining[pos];
-
-            const uint32_t pad = padding_if_placed(size, idx);
-            const uint32_t a   = member_align(idx);
-            const uint32_t s   = member_size(idx);
-
-            // compare (pad asc), (align desc), (size desc), (index asc)
-            bool better = false;
-            if (pad < best_pad)
-              better = true;
-            else if (pad == best_pad)
-            {
-              if (a > best_align)
-                better = true;
-              else if (a == best_align)
-              {
-                if (s > best_size)
-                  better = true;
-                else if (s == best_size)
-                {
-                  if (idx < best_idx)
-                    better = true;
-                }
-              }
-            }
-
-            if (better)
-            {
-              best_pos   = pos;
-              best_idx   = idx;
-              best_pad   = pad;
-              best_align = a;
-              best_size  = s;
-            }
-          }
-
-          const auto& member = members[best_idx];
-          auto& out_member   = members_ptr[out_i];
-
-          out_member.name        = member.name;
-          out_member.description = member.description;
-          out_member.type        = member.type;
-
-          const uint32_t a = member.type->type_align;
-          const uint32_t s = member.type->type_size;
-
-          size                         = (uint32_t)align_up_dyn(size, a);
-          out_member.address_or_offset = size;
-
-          size += s;
-          align = std::max(align, a);
-
-          remaining[best_pos] = remaining.back();
-          remaining.pop_back();
-        }
-        size = (uint32_t)align_up_dyn(size, align);
-      }
-      catch (...)
+      // may fail due to allocation failure
+      if (!rt_type_create_runtime_optimize_size_fast(
+              lt, align, size, members_ptr, members))
       {
         delete[] members_ptr;
         return result_type_fail_mem();
@@ -1006,7 +1348,7 @@ namespace stdcolt::ext::rt
     }
 
     auto type = rt_type_create(
-        ctx, name, {members_ptr, members.size()}, align, size, alloc_override,
+        ctx, name, {members_ptr, members.size()}, align, size, &lt, alloc_override,
         phf_override);
     delete[] members_ptr;
     return type;
@@ -1145,9 +1487,6 @@ namespace stdcolt::ext::rt
       return lookup_expected_named();
 
     const NamedTypeVTable* vt = pm.owner->kind_named.vtable;
-    if (!vt || vt->count_members == 0)
-      return lookup_not_found();
-
     if (pm.tag1 >= vt->count_members)
       return lookup_not_found();
 
@@ -1159,5 +1498,236 @@ namespace stdcolt::ext::rt
     if (e.tag != pm.tag2)
       return lookup_not_found();
     return lookup_found(e.address_or_offset);
+  }
+
+  static inline Allocator ctx_allocator(RuntimeContext* ctx) noexcept
+  {
+    Allocator a{};
+    a.state              = ctx->default_alloc_state.ptr();
+    a.allocator_alloc    = ctx->default_alloc_recipe.allocator_alloc;
+    a.allocator_dealloc  = ctx->default_alloc_recipe.allocator_dealloc;
+    a.allocator_destruct = &noop_destruct;
+    return a;
+  }
+
+  static inline Allocator instance_allocator_for(Type type) noexcept
+  {
+    RuntimeContext* ctx = type->owner;
+    STDCOLT_debug_assert(ctx != nullptr, "invalid type");
+
+    switch ((TypeKind)type->kind)
+    {
+    case TypeKind::KIND_NAMED:
+    {
+      const NamedTypeVTable* vt = type->kind_named.vtable;
+      STDCOLT_debug_assert(vt != nullptr, "named type without vtable");
+      return vt->allocator; // may be override or ctx default
+    }
+
+    case TypeKind::KIND_ARRAY:
+      STDCOLT_debug_assert(
+          type->kind_array.array_type != nullptr, "array missing element type");
+      // recurse so arrays of arrays end up using the base element's named allocator
+      return instance_allocator_for(type->kind_array.array_type);
+
+    default:
+      return ctx_allocator(ctx);
+    }
+  }
+
+  static inline bool is_type_movable(Type type) noexcept
+  {
+    return type->trivial_movable || type->has_move_fn;
+  }
+  static inline bool is_type_copyable(Type type) noexcept
+  {
+    return type->trivial_copyable || type->has_copy_fn;
+  }
+  static inline void* to_address_in_sbo(Type type, void* sbo) noexcept
+  {
+    // fast case, object does not need padding
+    if (type->type_align <= VALUE_SBO_ALIGN && type->type_size <= VALUE_SBO_SIZE)
+      return sbo;
+
+    // must fit EVEN WITH THE WORST CASE PADDING...
+    // if not true: moving from a Value to another that are not aligned
+    // in the same way may convert an inline value to a heap stored value
+    // which is unacceptable due to moving always being guaranteed to succeed.
+    if (type->type_size + (type->type_align - 1) > VALUE_SBO_SIZE)
+      return nullptr;
+
+    // now safe to compute aligned placement: it will always fit
+    const auto base         = reinterpret_cast<uintptr_t>(sbo);
+    const uintptr_t aligned = align_up_dyn(base, type->type_align);
+    return reinterpret_cast<void*>(aligned);
+  }
+  static inline bool is_in_sbo(const Value* val_addr) noexcept
+  {
+    const auto addr = (uintptr_t)val_addr->header.address;
+    const auto buf  = (uintptr_t)val_addr->inline_buffer;
+    // exact check in buffer...
+    return buf <= addr && addr < buf + VALUE_SBO_SIZE;
+  }
+  static inline bool is_in_heap(const Value* val_addr) noexcept
+  {
+    return val_addr->header.address != nullptr && !is_in_sbo(val_addr);
+  }
+
+  bool val_construct(Value* out, Type type) noexcept
+  {
+    if (type == nullptr)
+    {
+      val_construct_empty(out);
+      return true;
+    }
+
+    void* object = nullptr;
+    // if the type is movable and an object may fit under the worst-case
+    // padding rule at runtime in the SBO, store it inline
+    if (is_type_movable(type)
+        && (object = to_address_in_sbo(type, out->inline_buffer)))
+    {
+      // sbo, nothing needed
+    }
+    else // heap allocation
+    {
+      Allocator a = instance_allocator_for(type);
+      Block blk   = a.allocator_alloc(a.state, type->type_size, type->type_align);
+      if (!blk.ptr)
+        return val_construct_empty(out), false;
+      object = blk.ptr;
+    }
+    out->header.type    = type;
+    out->header.address = object;
+    return true;
+  }
+
+  void val_construct_empty(Value* out) noexcept
+  {
+    out->header.address = nullptr;
+    out->header.type    = nullptr;
+  }
+
+  void val_construct_from_move(Value* out, Value* to_move) noexcept
+  {
+    STDCOLT_pre(out != nullptr, "expected non-null parameter");
+    STDCOLT_pre(to_move != nullptr, "expected non-null parameter");
+    STDCOLT_pre(out != to_move, "invalid parameters");
+
+    auto type = to_move->header.type;
+    // if empty, make result empty
+    if (type == nullptr)
+      return val_construct_empty(out);
+    // if in heap, we can simply copy the pointer and mark to_move empty.
+    if (is_in_heap(to_move))
+    {
+      // copy header
+      out->header = to_move->header;
+      return val_construct_empty(to_move);
+    }
+    // object in SBO
+    STDCOLT_debug_assert(is_type_movable(type), "expected movable type");
+    // we need to recompute the address into the SBO as `out` and `to_move`
+    // may have different alignment. to_address_in_sbo is guaranteed to
+    // not fail in this case
+    auto new_addr = to_address_in_sbo(type, out->inline_buffer);
+    STDCOLT_debug_assert(new_addr != nullptr, "corrupted value received");
+
+    if (type->trivial_movable)
+      memcpy(new_addr, to_move->header.address, type->type_size);
+    else // type has a move function
+    {
+      STDCOLT_debug_assert(
+          type->kind == (uint8_t)TypeKind::KIND_NAMED, "expected named types");
+      type->kind_named.move_fn(type, new_addr, to_move->header.address);
+    }
+
+    out->header.type    = type;
+    out->header.address = new_addr;
+    val_construct_empty(to_move);
+  }
+
+  bool val_construct_from_copy(Value* out, const Value* to_copy) noexcept
+  {
+    STDCOLT_pre(out != nullptr, "expected non-null parameter");
+    STDCOLT_pre(to_copy != nullptr, "expected non-null parameter");
+
+    // do not copy if same value
+    if (to_copy == out)
+      return true;
+
+    auto type = to_copy->header.type;
+    // if empty, make result empty
+    if (type == nullptr)
+      return val_construct_empty(out), true;
+    // if the type is not copyable, return early...
+    if (!is_type_copyable(type))
+      return val_construct_empty(out), false;
+
+    void* new_addr     = nullptr;
+    bool heap_allocate = false;
+    if (is_in_heap(to_copy))
+    {
+      heap_allocate = true;
+
+      Allocator a = instance_allocator_for(type);
+      Block blk   = a.allocator_alloc(a.state, type->type_size, type->type_align);
+      if (!blk.ptr)
+        return val_construct_empty(out), false;
+
+      new_addr = blk.ptr;
+    }
+    else // object in SBO
+    {
+      // we need to recompute the address into the SBO as `out` and `to_copy`
+      // may have different alignment. to_address_in_sbo is guaranteed to
+      // not fail in this case
+      new_addr = to_address_in_sbo(type, out->inline_buffer);
+      STDCOLT_debug_assert(new_addr != nullptr, "corrupted value received");
+    }
+
+    if (type->trivial_copyable)
+      memcpy(new_addr, to_copy->header.address, type->type_size);
+    else
+    {
+      STDCOLT_debug_assert(
+          type->kind == (uint8_t)TypeKind::KIND_NAMED, "expected named types");
+      // if copy is not successful, clear `out` and return false
+      if (!type->kind_named.copy_fn(type, new_addr, to_copy->header.address))
+      {
+        if (heap_allocate)
+        {
+          Allocator a = instance_allocator_for(type);
+          a.allocator_dealloc(a.state, Block{new_addr, type->type_size});
+        }
+        val_construct_empty(out);
+        return false;
+      }
+    }
+
+    out->header.type    = type;
+    out->header.address = new_addr;
+    return true;
+  }
+
+  void val_destroy(Value* val) noexcept
+  {
+    // noop for empty values
+    if (val == nullptr || val->header.type == nullptr)
+      return;
+    auto type = val->header.type;
+    if (!type->trivial_destroy)
+    {
+      STDCOLT_debug_assert(
+          type->kind == (uint8_t)TypeKind::KIND_NAMED, "expected named types");
+      // call destructor
+      type->kind_named.destroy_fn(type, val->header.address);
+    }
+    if (is_in_heap(val))
+    {
+      Allocator a = instance_allocator_for(type);
+      a.allocator_dealloc(a.state, Block{val->header.address, type->type_size});
+    }
+    val_construct_empty(val);
   }
 } // namespace stdcolt::ext::rt
