@@ -545,7 +545,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value construction modes and destroy
     Type t_i32 = type_of<int32_t>(ctx);
     REQUIRE(t_i32 != nullptr);
 
-    REQUIRE(val_construct(&v, t_i32) == true);
+    REQUIRE(val_construct(&v, t_i32) == ValueResultKind::VALUE_SUCCESS);
     CHECK(v.header.type == t_i32);
     CHECK(v.header.address != nullptr);
 
@@ -562,7 +562,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value construction modes and destroy
     Type big = type_of<uint8_t[512]>(ctx); // should exceed SBO
     REQUIRE(big != nullptr);
 
-    REQUIRE(val_construct(&v, big) == true);
+    REQUIRE(val_construct(&v, big) == ValueResultKind::VALUE_SUCCESS);
     CHECK(v.header.type == big);
     CHECK(v.header.address != nullptr);
 
@@ -597,7 +597,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Runtime type lifetime recursion: "
 
   // construct a Value holding Outer and placement-new the member
   Value v{};
-  REQUIRE(val_construct(&v, t_outer) == true);
+  REQUIRE(val_construct(&v, t_outer) == ValueResultKind::VALUE_SUCCESS);
 
   auto off = rt_type_lookup(t_outer, {u8"m", 2}, t_dt);
   REQUIRE(off.result == LookupResult::LOOKUP_FOUND);
@@ -649,7 +649,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Copy rollback destroys already-copie
 
   // Create a source value and construct both members
   Value src{};
-  REQUIRE(val_construct(&src, t_outer) == true);
+  REQUIRE(val_construct(&src, t_outer) == ValueResultKind::VALUE_SUCCESS);
 
   auto off_a = rt_type_lookup(t_outer, {u8"a", 2}, t_dt);
   auto off_b = rt_type_lookup(t_outer, {u8"b", 2}, t_fail);
@@ -664,8 +664,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: Copy rollback destroys already-copie
 
   // Copy should fail and rollback should destroy already-copied `a`
   Value dst{};
-  bool ok = val_construct_from_copy(&dst, &src);
-  CHECK(ok == false);
+  auto ok = val_construct_from_copy(&dst, &src);
+  CHECK(ok != ValueResultKind::VALUE_SUCCESS);
   CHECK(dst.header.type == nullptr);
   CHECK(dst.header.address == nullptr);
   CHECK(DtorCounter::dtors.load() == 1);
@@ -718,7 +718,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Va
     int d0 = g_counting.deallocs.load();
 
     Value v1{};
-    REQUIRE(val_construct(&v1, t_big) == true);
+    REQUIRE(val_construct(&v1, t_big) == ValueResultKind::VALUE_SUCCESS);
     CHECK(g_counting.allocs.load() == a0 + 1);
 
     val_destroy(&v1);
@@ -736,7 +736,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Va
     int d1 = g_counting.deallocs.load();
 
     Value v2{};
-    REQUIRE(val_construct(&v2, t_arr) == true);
+    REQUIRE(val_construct(&v2, t_arr) == ValueResultKind::VALUE_SUCCESS);
     CHECK(g_counting.allocs.load() == a1 + 1);
 
     val_destroy(&v2);
@@ -751,7 +751,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Va
     int a2 = g_counting.allocs.load();
 
     Value v3{};
-    REQUIRE(val_construct(&v3, t_u64) == true);
+    REQUIRE(val_construct(&v3, t_u64) == ValueResultKind::VALUE_SUCCESS);
     CHECK(g_counting.allocs.load() == a2);
 
     val_destroy(&v3);
@@ -864,7 +864,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
     REQUIRE(t_i32 != nullptr);
 
     Value src{};
-    REQUIRE(val_construct(&src, t_i32) == true);
+    REQUIRE(val_construct(&src, t_i32) == ValueResultKind::VALUE_SUCCESS);
     *reinterpret_cast<int32_t*>(src.header.address) = 123;
 
     Value dst{};
@@ -888,7 +888,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
     REQUIRE(big != nullptr);
 
     Value src{};
-    REQUIRE(val_construct(&src, big) == true);
+    REQUIRE(val_construct(&src, big) == ValueResultKind::VALUE_SUCCESS);
 
     auto* p = reinterpret_cast<uint8_t*>(src.header.address);
     p[0]    = 0xAB;
@@ -938,14 +938,14 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     REQUIRE(t != nullptr);
 
     Value src{};
-    REQUIRE(val_construct(&src, t) == true);
+    REQUIRE(val_construct(&src, t) == ValueResultKind::VALUE_SUCCESS);
     auto* ps = reinterpret_cast<uint8_t*>(src.header.address);
     for (int i = 0; i < 8; ++i)
       ps[i] = static_cast<uint8_t>(0xA0 + i);
 
     Value dst{};
-    bool ok = val_construct_from_copy(&dst, &src);
-    CHECK(ok == true);
+    auto ok = val_construct_from_copy(&dst, &src);
+    CHECK(ok == ValueResultKind::VALUE_SUCCESS);
     CHECK(dst.header.type == t);
     REQUIRE(dst.header.address != nullptr);
 
@@ -963,7 +963,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     REQUIRE(t_arr != nullptr);
 
     Value src{};
-    REQUIRE(val_construct(&src, t_arr) == true);
+    REQUIRE(val_construct(&src, t_arr) == ValueResultKind::VALUE_SUCCESS);
 
     auto* a = reinterpret_cast<uint32_t*>(src.header.address);
     a[0]    = 10;
@@ -972,8 +972,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     a[3]    = 40;
 
     Value dst{};
-    bool ok = val_construct_from_copy(&dst, &src);
-    CHECK(ok == true);
+    auto ok = val_construct_from_copy(&dst, &src);
+    CHECK(ok == ValueResultKind::VALUE_SUCCESS);
     CHECK(dst.header.type == t_arr);
 
     auto* b = reinterpret_cast<uint32_t*>(dst.header.address);
@@ -1035,7 +1035,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
 
     // Build src with constructed a and inner.b; set inner.c byte
     Value src{};
-    REQUIRE(val_construct(&src, t_outer) == true);
+    REQUIRE(val_construct(&src, t_outer) == ValueResultKind::VALUE_SUCCESS);
 
     auto off_a = rt_type_lookup(t_outer, {u8"a", 2}, t_dt);
     auto off_i = rt_type_lookup(t_outer, {u8"i", 2}, t_inner);
@@ -1059,8 +1059,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
 
     // Copy should fail at inner.c and rollback should destroy copies of a and b in dst attempt
     Value dst{};
-    bool ok = val_construct_from_copy(&dst, &src);
-    CHECK(ok == false);
+    auto ok = val_construct_from_copy(&dst, &src);
+    CHECK(ok != ValueResultKind::VALUE_SUCCESS);
     CHECK(dst.header.type == nullptr);
     CHECK(dst.header.address == nullptr);
 
