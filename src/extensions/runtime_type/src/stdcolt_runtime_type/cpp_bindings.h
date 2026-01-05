@@ -30,7 +30,7 @@ namespace stdcolt::ext::rt
   // TYPE TAGS
   /***********************/
 
-  template<class T>
+  template<typename T>
   struct type_tag
   {
     static Type get(RuntimeContext* ctx) noexcept
@@ -40,7 +40,7 @@ namespace stdcolt::ext::rt
     }
   };
 
-  template<class T>
+  template<typename T>
   Type type_of(RuntimeContext* ctx) noexcept
   {
     return type_tag<T>::get(ctx);
@@ -199,40 +199,36 @@ namespace stdcolt::ext::rt
       return nullptr;
     }
   };
-
-  template<class T>
+  template<typename T>
   struct type_tag<const T> : type_tag<T>
   {
   };
-
-  template<class T>
+  template<typename T>
   struct type_tag<volatile T> : type_tag<T>
   {
   };
-  template<class T>
+  template<typename T>
   struct type_tag<const volatile T> : type_tag<T>
   {
   };
 
-  template<class T>
+  template<typename T>
   struct type_tag<T&>
   {
     static Type get(RuntimeContext* ctx) noexcept { return type_of<T*>(ctx); }
   };
-
-  template<class T>
+  template<typename T>
   struct type_tag<const T&>
   {
     static Type get(RuntimeContext* ctx) noexcept { return type_of<const T*>(ctx); }
   };
-
-  template<class T>
+  template<typename T>
   struct type_tag<T&&>
   {
     static Type get(RuntimeContext* ctx) noexcept { return type_of<T*>(ctx); }
   };
 
-  template<class T>
+  template<typename T>
   struct type_tag<T*>
   {
     static Type get(RuntimeContext* ctx) noexcept
@@ -248,8 +244,7 @@ namespace stdcolt::ext::rt
       }
     }
   };
-
-  template<class T>
+  template<typename T>
   struct type_tag<const T*>
   {
     static Type get(RuntimeContext* ctx) noexcept
@@ -264,6 +259,36 @@ namespace stdcolt::ext::rt
         return nullptr;
       }
     }
+  };
+
+  template<class T, size_t N>
+  struct type_tag<T[N]>
+  {
+    static Type get(RuntimeContext* ctx) noexcept
+    {
+      using Elem = std::remove_cv_t<T>;
+
+      Type elem = type_of<Elem>(ctx);
+      if (!elem)
+        return nullptr;
+
+      auto r = rt_type_create_array(ctx, elem, (uint64_t)N);
+      if (r.result == TypeResult::TYPE_SUCCESS)
+        return r.success.type;
+      return nullptr;
+    }
+  };
+  template<class T, size_t N>
+  struct type_tag<const T[N]> : type_tag<T[N]>
+  {
+  };
+  template<class T, size_t N>
+  struct type_tag<volatile T[N]> : type_tag<T[N]>
+  {
+  };
+  template<class T, size_t N>
+  struct type_tag<const volatile T[N]> : type_tag<T[N]>
+  {
   };
 
   template<class R, class... A>
@@ -388,19 +413,102 @@ namespace stdcolt::ext::rt
     { d.make_member(ctx) } noexcept -> std::same_as<Member>;
   };
 
+  template<typename T>
+  static void destroy_T(const TypeDesc*, void* p) noexcept
+  {
+    std::destroy_at(reinterpret_cast<T*>(p));
+  }
+
+  template<typename T>
+  static bool copy_T(const TypeDesc*, void* out, const void* src) noexcept
+  {
+    try
+    {
+      std::construct_at(reinterpret_cast<T*>(out), *reinterpret_cast<const T*>(src));
+      return true;
+    }
+    catch (...)
+    {
+      return false;
+    }
+  }
+
+  template<typename T>
+  static void move_T(const TypeDesc*, void* out, void* src) noexcept
+  {
+    auto* s = reinterpret_cast<T*>(src);
+    std::construct_at(reinterpret_cast<T*>(out), std::move(*s));
+    std::destroy_at(s);
+  }
+
+  template<typename T>
+  static constexpr NamedLifetime make_lifetime() noexcept
+  {
+    NamedLifetime lt{};
+    lt.move_fn               = nullptr;
+    lt.copy_fn               = nullptr;
+    lt.destroy_fn            = nullptr;
+    lt.is_trivially_movable  = 0;
+    lt.is_trivially_copyable = 0;
+
+    // Destroy
+    if constexpr (!std::is_trivially_destructible_v<T>)
+      lt.destroy_fn = &destroy_T<T>;
+
+    // Copy
+    if constexpr (std::is_trivially_copyable_v<T>)
+    {
+      lt.copy_fn               = nullptr;
+      lt.is_trivially_copyable = 1;
+    }
+    else if constexpr (std::is_copy_constructible_v<T>)
+    {
+      lt.copy_fn               = &copy_T<T>;
+      lt.is_trivially_copyable = 0;
+    }
+    else
+    {
+      lt.copy_fn               = nullptr;
+      lt.is_trivially_copyable = 0;
+    }
+
+    // Move
+    if constexpr (
+        std::is_trivially_move_constructible_v<T>
+        && std::is_trivially_destructible_v<T>)
+    {
+      lt.move_fn              = nullptr;
+      lt.is_trivially_movable = 1;
+    }
+    else if constexpr (std::is_nothrow_move_constructible_v<T>)
+    {
+      lt.move_fn              = &move_T<T>;
+      lt.is_trivially_movable = 0;
+    }
+    else
+    {
+      // Cannot provide move_fn because it must be noexcept.
+      lt.move_fn              = nullptr;
+      lt.is_trivially_movable = 0;
+    }
+
+    return lt;
+  }
+
   template<typename T, MemberDescriptor... Ts>
   TypeResult bind_type(
       RuntimeContext* ctx, std::u8string_view name, Ts&&... ts) noexcept
   {
     Member members[sizeof...(Ts)]{};
-    std::size_t i = 0;
+    size_t i = 0;
     ((members[i++] = ts.make_member(ctx)), ...);
+    static constexpr NamedLifetime lt = make_lifetime<std::remove_cv_t<T>>();
+
     auto t = rt_type_create(
         ctx, {name.data(), name.size()}, {members, sizeof...(Ts)}, alignof(T),
-        sizeof(T));
+        sizeof(T), &lt);
     if (t.result == TypeResult::TYPE_SUCCESS)
     {
-      // TODO: check result
       (void)rt_register_set_type(
           ctx, unique_opaque_type_id_for<std::remove_cv_t<T>>(), t.success.type);
     }
