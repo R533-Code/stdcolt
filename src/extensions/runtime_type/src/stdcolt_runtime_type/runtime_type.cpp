@@ -18,8 +18,7 @@ namespace stdcolt::ext::rt
     // does nothing
   }
 
-  static constexpr size_t BUILTIN_COUNT =
-      (size_t)BuiltInType::TYPE_CONST_OPAQUE_ADDRESS + 1;
+  static constexpr size_t BUILTIN_COUNT = (size_t)BuiltInType::_BuiltInType_end;
 
   static inline bool is_pow2(size_t n) noexcept
   {
@@ -1573,12 +1572,12 @@ namespace stdcolt::ext::rt
     return val_addr->header.address != nullptr && !is_in_sbo(val_addr);
   }
 
-  bool val_construct(Value* out, Type type) noexcept
+  ValueResultKind val_construct(Value* out, Type type) noexcept
   {
     if (type == nullptr)
     {
       val_construct_empty(out);
-      return true;
+      return ValueResultKind::VALUE_SUCCESS;
     }
 
     void* object = nullptr;
@@ -1594,12 +1593,12 @@ namespace stdcolt::ext::rt
       Allocator a = instance_allocator_for(type);
       Block blk   = a.allocator_alloc(a.state, type->type_size, type->type_align);
       if (!blk.ptr)
-        return val_construct_empty(out), false;
+        return val_construct_empty(out), ValueResultKind::VALUE_FAIL_MEMORY;
       object = blk.ptr;
     }
     out->header.type    = type;
     out->header.address = object;
-    return true;
+    return ValueResultKind::VALUE_SUCCESS;
   }
 
   void val_construct_empty(Value* out) noexcept
@@ -1647,22 +1646,22 @@ namespace stdcolt::ext::rt
     val_construct_empty(to_move);
   }
 
-  bool val_construct_from_copy(Value* out, const Value* to_copy) noexcept
+  ValueResultKind val_construct_from_copy(Value* out, const Value* to_copy) noexcept
   {
     STDCOLT_pre(out != nullptr, "expected non-null parameter");
     STDCOLT_pre(to_copy != nullptr, "expected non-null parameter");
 
     // do not copy if same value
     if (to_copy == out)
-      return true;
+      return ValueResultKind::VALUE_SUCCESS;
 
     auto type = to_copy->header.type;
     // if empty, make result empty
     if (type == nullptr)
-      return val_construct_empty(out), true;
+      return val_construct_empty(out), ValueResultKind::VALUE_SUCCESS;
     // if the type is not copyable, return early...
     if (!is_type_copyable(type))
-      return val_construct_empty(out), false;
+      return val_construct_empty(out), ValueResultKind::VALUE_NOT_COPYABLE;
 
     void* new_addr     = nullptr;
     bool heap_allocate = false;
@@ -1673,7 +1672,7 @@ namespace stdcolt::ext::rt
       Allocator a = instance_allocator_for(type);
       Block blk   = a.allocator_alloc(a.state, type->type_size, type->type_align);
       if (!blk.ptr)
-        return val_construct_empty(out), false;
+        return val_construct_empty(out), ValueResultKind::VALUE_FAIL_COPY;
 
       new_addr = blk.ptr;
     }
@@ -1701,13 +1700,13 @@ namespace stdcolt::ext::rt
           a.allocator_dealloc(a.state, Block{new_addr, type->type_size});
         }
         val_construct_empty(out);
-        return false;
+        return ValueResultKind::VALUE_FAIL_COPY;
       }
     }
 
     out->header.type    = type;
     out->header.address = new_addr;
-    return true;
+    return ValueResultKind::VALUE_SUCCESS;
   }
 
   void val_destroy(Value* val) noexcept

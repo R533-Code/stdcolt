@@ -72,6 +72,8 @@ namespace stdcolt::ext::rt
     KIND_FUNCTION,
     /// @brief An exception.
     KIND_EXCEPTION,
+
+    _TypeKind_end,
   };
 
   /// @brief A built-in type
@@ -103,6 +105,8 @@ namespace stdcolt::ext::rt
     TYPE_OPAQUE_ADDRESS,
     /// @brief Opaque (untyped) address (equivalent to `const void*`)
     TYPE_CONST_OPAQUE_ADDRESS,
+
+    _BuiltInType_end
   };
 
   /// @brief Type descriptor (owned by RuntimeContext)
@@ -646,6 +650,19 @@ namespace stdcolt::ext::rt
     alignas(VALUE_SBO_ALIGN) uint8_t inline_buffer[VALUE_SBO_SIZE];
   };
 
+  /// @brief The result of fallible operations on `Value`
+  enum class ValueResultKind : uint8_t
+  {
+    /// @brief Success
+    VALUE_SUCCESS,
+    /// @brief Could not allocate necessary memory
+    VALUE_FAIL_MEMORY,
+    /// @brief The copy function failed
+    VALUE_FAIL_COPY,
+    /// @brief Type is not copyable
+    VALUE_NOT_COPYABLE,
+  };
+
   /// @brief Initialize the storage of a `Value` for a specific type.
   /// This function does not initialize the stored value: this is not
   /// a constructor call, this is a storage allocation. Initialization
@@ -656,7 +673,7 @@ namespace stdcolt::ext::rt
   /// @return True on success, else failure
   /// @pre `out` may not be null, else UB!
   STDCOLT_RUNTIME_TYPE_EXPORT
-  bool val_construct(Value* out, Type type) noexcept;
+  ValueResultKind val_construct(Value* out, Type type) noexcept;
 
   /// @brief Constructs an empty `Value`.
   /// Empty values do not need to be destroyed, and have `header.type == null`.
@@ -682,7 +699,7 @@ namespace stdcolt::ext::rt
   /// @return True on success, false on failure
   /// @pre No parameter may be null, else UB!
   STDCOLT_RUNTIME_TYPE_EXPORT
-  bool val_construct_from_copy(Value* out, const Value* to_copy) noexcept;
+  ValueResultKind val_construct_from_copy(Value* out, const Value* to_copy) noexcept;
 
   /// @brief Destroys the stored value then the storage of a Value.
   /// @param val Value to destroy (or null), marked empty afterwards
