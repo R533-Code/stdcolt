@@ -1,6 +1,7 @@
 #include "runtime_type.h"
 
 #include <atomic>
+#include <span>
 #include <cstring>
 #include <new>
 #include <string>
@@ -11,14 +12,41 @@
 
 #include <stdcolt_allocators/allocators/mallocator.h>
 
-namespace stdcolt::ext::rt
+using namespace stdcolt;
+
+using Type            = stdcolt_ext_rt_Type;
+using TypeDesc        = stdcolt_ext_rt_TypeDesc;
+using NamedLifetime   = stdcolt_ext_rt_NamedLifetime;
+using Member          = stdcolt_ext_rt_Member;
+using MemberInfo      = stdcolt_ext_rt_MemberInfo;
+using OpaqueTypeID    = stdcolt_ext_rt_OpaqueTypeID;
+using PreparedMember  = stdcolt_ext_rt_PreparedMember;
+using Value           = stdcolt_ext_rt_Value;
+using NamedTypeVTable = stdcolt_ext_rt_NamedTypeVTable;
+
+using Block                     = stdcolt_ext_rt_Block;
+using Key                       = stdcolt_ext_rt_Key;
+using Allocator                 = stdcolt_ext_rt_Allocator;
+using PerfectHashFunction       = stdcolt_ext_rt_PerfectHashFunction;
+using RecipeAllocator           = stdcolt_ext_rt_RecipeAllocator;
+using RecipePerfectHashFunction = stdcolt_ext_rt_RecipePerfectHashFunction;
+
+using BuiltInType     = stdcolt_ext_rt_BuiltInType;
+using Layout          = stdcolt_ext_rt_Layout;
+using ResultValueKind = stdcolt_ext_rt_ResultValueKind;
+
+using ResultLookup         = stdcolt_ext_rt_ResultLookup;
+using ResultRuntimeContext = stdcolt_ext_rt_ResultRuntimeContext;
+using ResultType           = stdcolt_ext_rt_ResultType;
+
+extern "C"
 {
   static void noop_destruct(void*) noexcept
   {
     // does nothing
   }
 
-  static constexpr size_t BUILTIN_COUNT = (size_t)BuiltInType::_BuiltInType_end;
+  static constexpr size_t BUILTIN_COUNT = (size_t)STDCOLT_EXT_RT_BUILTIN_TYPE_end;
 
   static inline bool is_pow2(size_t n) noexcept
   {
@@ -31,14 +59,16 @@ namespace stdcolt::ext::rt
     return (v + (align - 1)) & ~(align - 1);
   }
 
-  static inline bool phf_recipe_valid(const RecipePerfectHashFunction& r) noexcept
+  static inline bool phf_recipe_valid(
+      const stdcolt_ext_rt_RecipePerfectHashFunction& r) noexcept
   {
     return r.phf_alignof >= 1 && r.phf_sizeof >= 1 && is_pow2(r.phf_alignof)
            && r.phf_construct != nullptr && r.phf_destruct != nullptr
            && r.phf_lookup != nullptr;
   }
 
-  static inline bool alloc_recipe_valid(const RecipeAllocator& r) noexcept
+  static inline bool alloc_recipe_valid(
+      const stdcolt_ext_rt_RecipeAllocator& r) noexcept
   {
     return r.allocator_alignof >= 1 && is_pow2(r.allocator_alignof)
            && r.allocator_construct != nullptr && r.allocator_destruct != nullptr
@@ -168,7 +198,7 @@ namespace stdcolt::ext::rt
     RTMemberDescription* true_description;
   };
 
-  struct NamedTypeVTable
+  struct stdcolt_ext_rt_NamedTypeVTable
   {
     uint64_t allocation_size;
 
@@ -187,7 +217,7 @@ namespace stdcolt::ext::rt
     }
   };
 
-  struct RuntimeContext
+  struct stdcolt_ext_rt_RuntimeContext
   {
     RecipeAllocator default_alloc_recipe{};
     alloc::Block default_alloc_state = {};
@@ -254,43 +284,43 @@ namespace stdcolt::ext::rt
         sizeof(int64_t),  sizeof(float),   sizeof(double),   sizeof(void*),
         sizeof(void*)};
 
-    if ((size_t)type >= BUILTIN_COUNT)
+    if (type >= BUILTIN_COUNT)
       return (uint32_t)-1;
     return SIZES[(size_t)type];
   }
 
-  static inline LookupResult lookup_expected_named() noexcept
+  static inline ResultLookup lookup_expected_named() noexcept
   {
-    LookupResult r{};
-    r.result = LookupResult::ResultKind::LOOKUP_EXPECTED_NAMED;
+    ResultLookup r{};
+    r.result = STDCOLT_EXT_RT_LOOKUP_EXPECTED_NAMED;
     return r;
   }
 
-  static inline LookupResult lookup_not_found() noexcept
+  static inline ResultLookup lookup_not_found() noexcept
   {
-    LookupResult r{};
-    r.result = LookupResult::ResultKind::LOOKUP_NOT_FOUND;
+    ResultLookup r{};
+    r.result = STDCOLT_EXT_RT_LOOKUP_NOT_FOUND;
     return r;
   }
 
-  static inline LookupResult lookup_found(uintptr_t addr) noexcept
+  static inline ResultLookup lookup_found(uintptr_t addr) noexcept
   {
-    LookupResult r{};
-    r.result                  = LookupResult::ResultKind::LOOKUP_FOUND;
-    r.found.address_or_offset = addr;
+    ResultLookup r{};
+    r.result                       = STDCOLT_EXT_RT_LOOKUP_FOUND;
+    r.data.found.address_or_offset = addr;
     return r;
   }
 
-  static inline LookupResult lookup_mismatch(Type actual) noexcept
+  static inline ResultLookup lookup_mismatch(Type actual) noexcept
   {
-    LookupResult r{};
-    r.result                    = LookupResult::ResultKind::LOOKUP_MISMATCH_TYPE;
-    r.mismatch_type.actual_type = actual;
+    ResultLookup r{};
+    r.result                         = STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE;
+    r.data.mismatch_type.actual_type = actual;
     return r;
   }
 
   static inline TypeDesc* alloc_from_ctx(
-      RuntimeContext* ctx, size_t bytes, size_t align) noexcept
+      stdcolt_ext_rt_RuntimeContext* ctx, size_t bytes, size_t align) noexcept
   {
     Block blk = ctx->default_alloc_recipe.allocator_alloc(
         ctx->default_alloc_state.ptr(), bytes, align);
@@ -300,48 +330,50 @@ namespace stdcolt::ext::rt
   }
 
   static inline void dealloc_from_ctx(
-      RuntimeContext* ctx, void* ptr, size_t bytes) noexcept
+      stdcolt_ext_rt_RuntimeContext* ctx, void* ptr, size_t bytes) noexcept
   {
+    auto blk = Block{ptr, bytes};
     ctx->default_alloc_recipe.allocator_dealloc(
-        ctx->default_alloc_state.ptr(), Block{ptr, bytes});
+        ctx->default_alloc_state.ptr(), &blk);
   }
 
   /*************************/
-  // RuntimeContextResult
+  // ResultRuntimeContext
   /*************************/
 
-  static inline RuntimeContextResult result_rc_invalid_alloc() noexcept
+  static inline ResultRuntimeContext result_rc_invalid_alloc() noexcept
   {
-    return RuntimeContextResult{
-        .result{RuntimeContextResult::RT_INVALID_ALLOCATOR}, .success{nullptr}};
+    return ResultRuntimeContext{
+        .result{STDCOLT_EXT_RT_CTX_INVALID_ALLOCATOR}, .data{.success{nullptr}}};
   }
-  static inline RuntimeContextResult result_rc_invalid_phf() noexcept
+  static inline ResultRuntimeContext result_rc_invalid_phf() noexcept
   {
-    return RuntimeContextResult{
-        .result{RuntimeContextResult::RT_INVALID_PHF}, .success{nullptr}};
+    return ResultRuntimeContext{
+        .result{STDCOLT_EXT_RT_CTX_INVALID_PHF}, .data{.success{nullptr}}};
   }
-  static inline RuntimeContextResult result_rc_fail_mem() noexcept
+  static inline ResultRuntimeContext result_rc_fail_mem() noexcept
   {
-    return RuntimeContextResult{
-        .result{RuntimeContextResult::RT_FAIL_MEMORY}, .success{nullptr}};
+    return ResultRuntimeContext{
+        .result{STDCOLT_EXT_RT_CTX_FAIL_MEMORY}, .data{.success{nullptr}}};
   }
 
   /*************************/
   // RuntimeContext Lifetime
   /*************************/
 
-  RuntimeContextResult rt_create(
-      const RecipeAllocator* alloc, const RecipePerfectHashFunction* phf) noexcept
+  ResultRuntimeContext stdcolt_ext_rt_create(
+      const RecipeAllocator* alloc, const RecipePerfectHashFunction* phf)
   {
-    RecipeAllocator alloc_recipe = alloc == nullptr ? default_allocator() : *alloc;
+    RecipeAllocator alloc_recipe =
+        alloc == nullptr ? stdcolt_ext_rt_default_allocator() : *alloc;
     RecipePerfectHashFunction phf_recipe =
-        phf == nullptr ? default_perfect_hash_function() : *phf;
+        phf == nullptr ? stdcolt_ext_rt_default_perfect_hash_function() : *phf;
     if (!alloc_recipe_valid(alloc_recipe))
       return result_rc_invalid_alloc();
     if (!phf_recipe_valid(phf_recipe))
       return result_rc_invalid_phf();
 
-    auto ctx = new (std::nothrow) RuntimeContext();
+    auto ctx = new (std::nothrow) stdcolt_ext_rt_RuntimeContext();
     if (ctx == nullptr)
       return result_rc_fail_mem();
 
@@ -367,27 +399,27 @@ namespace stdcolt::ext::rt
     // initialize builtin types
     for (size_t i = 0; i < BUILTIN_COUNT; ++i)
     {
-      TypeDesc& td         = ctx->builtin_types[i];
-      td.kind              = (uint64_t)TypeKind::KIND_BUILTIN;
-      td._unused           = 0;
-      td.owner             = ctx;
-      td.trivial_copyable  = true;
-      td.trivial_movable   = true;
-      td.trivial_destroy   = true;
-      td.has_move_fn       = false;
-      td.has_copy_fn       = false;
-      td.opaque1           = nullptr;
-      td.opaque2           = nullptr;
-      td.kind_builtin.type = (BuiltInType)i;
-      td.type_size         = builtin_sizeof((BuiltInType)i);
-      td.type_align        = td.type_size;
+      TypeDesc& td              = ctx->builtin_types[i];
+      td.kind                   = STDCOLT_EXT_RT_TYPE_KIND_BUILTIN;
+      td._unused                = 0;
+      td.owner                  = ctx;
+      td.trivial_copyable       = true;
+      td.trivial_movable        = true;
+      td.trivial_destroy        = true;
+      td.has_move_fn            = false;
+      td.has_copy_fn            = false;
+      td.opaque1                = nullptr;
+      td.opaque2                = nullptr;
+      td.info.kind_builtin.type = (BuiltInType)i;
+      td.type_size              = builtin_sizeof((BuiltInType)i);
+      td.type_align             = td.type_size;
     }
 
-    return RuntimeContextResult{
-        .result{RuntimeContextResult::RT_SUCCESS}, .success{ctx}};
+    return ResultRuntimeContext{
+        .result{STDCOLT_EXT_RT_CTX_SUCCESS}, .data{.success{ctx}}};
   }
 
-  void rt_destroy(RuntimeContext* ctx) noexcept
+  void stdcolt_ext_rt_destroy(stdcolt_ext_rt_RuntimeContext* ctx)
   {
     if (!ctx)
       return;
@@ -397,9 +429,9 @@ namespace stdcolt::ext::rt
     {
       TypeDesc* td = kv.second;
       STDCOLT_debug_assert(
-          td != nullptr && td->kind == (uint64_t)TypeKind::KIND_NAMED,
+          td != nullptr && td->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED,
           "corrupted types_table");
-      const NamedTypeVTable* vt = td->kind_named.vtable;
+      const NamedTypeVTable* vt = td->info.kind_named.vtable;
       STDCOLT_debug_assert(vt != nullptr, "corrupted vtable");
 
       if (vt->phf.phf_destruct)
@@ -438,7 +470,7 @@ namespace stdcolt::ext::rt
       {
         TypeDesc* next = (TypeDesc*)node->opaque1;
 
-        const uint64_t argc = node->kind_function.argument_count;
+        const uint64_t argc = node->info.kind_function.argument_count;
         const size_t off    = align_up_dyn(sizeof(TypeDesc), alignof(Type));
         const size_t bytes  = off + argc * sizeof(Type);
 
@@ -462,53 +494,53 @@ namespace stdcolt::ext::rt
   }
 
   /*************************/
-  // TypeResult
+  // ResultType
   /*************************/
 
   // clang-format off
-  static inline TypeResult result_type_success(Type ret) noexcept
+  static inline ResultType result_type_success(Type ret) noexcept
   {
-    return {.result{TypeResult::TYPE_SUCCESS}, .success{ret}};
+    return {.result{STDCOLT_EXT_RT_TYPE_SUCCESS}, .data{.success{ret}}};
   }
-  static inline TypeResult result_type_invalid_phf() noexcept
+  static inline ResultType result_type_invalid_phf() noexcept
   {
-    return {.result{TypeResult::TYPE_INVALID_PHF}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_INVALID_PHF}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_invalid_align() noexcept
+  static inline ResultType result_type_invalid_align() noexcept
   {
-    return {.result{TypeResult::TYPE_INVALID_ALIGN}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_INVALID_ALIGN}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_invalid_alloc() noexcept
+  static inline ResultType result_type_invalid_alloc() noexcept
   {
-    return {.result{TypeResult::TYPE_INVALID_ALLOCATOR}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_INVALID_ALLOCATOR}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_invalid_param() noexcept
+  static inline ResultType result_type_invalid_param() noexcept
   {
-    return {.result{TypeResult::TYPE_INVALID_PARAM}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_INVALID_PARAM}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_invalid_context() noexcept
+  static inline ResultType result_type_invalid_context() noexcept
   {
-    return {.result{TypeResult::TYPE_INVALID_CONTEXT}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_INVALID_CONTEXT}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_invalid_owner() noexcept
+  static inline ResultType result_type_invalid_owner() noexcept
   {
-    return {.result{TypeResult::TYPE_INVALID_OWNER}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_INVALID_OWNER}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_fail_mem() noexcept
+  static inline ResultType result_type_fail_mem() noexcept
   {
-    return {.result{TypeResult::TYPE_FAIL_MEMORY}, .success{nullptr}};
+    return {.result{STDCOLT_EXT_RT_TYPE_FAIL_MEMORY}, .data{.success{nullptr}}};
   }
-  static inline TypeResult result_type_fail_create_phf(int32_t ret) noexcept
+  static inline ResultType result_type_fail_create_phf(int32_t ret) noexcept
   {
-    return {.result{TypeResult::TYPE_FAIL_CREATE_PHF}, .fail_create_phf{ret}};
+    return {.result{STDCOLT_EXT_RT_TYPE_FAIL_CREATE_PHF}, .data{.fail_create_phf{ret}}};
   }
-  static inline TypeResult result_type_fail_create_allocator(int32_t ret) noexcept
+  static inline ResultType result_type_fail_create_allocator(int32_t ret) noexcept
   {
-    return {.result{TypeResult::TYPE_FAIL_CREATE_ALLOCATOR}, .fail_create_allocator{ret}};
+    return {.result{STDCOLT_EXT_RT_TYPE_FAIL_CREATE_ALLOCATOR}, .data{.fail_create_allocator{ret}}};
   }
-  static inline TypeResult result_type_fail_exists(Type ret) noexcept
+  static inline ResultType result_type_fail_exists(Type ret) noexcept
   {
-    return {.result{TypeResult::TYPE_FAIL_EXISTS}, .fail_exists{ret}};
+    return {.result{STDCOLT_EXT_RT_TYPE_FAIL_EXISTS}, .data{.fail_exists{ret}}};
   }
   // clang-format on
 
@@ -516,7 +548,8 @@ namespace stdcolt::ext::rt
   // Type creation
   /*************************/
 
-  TypeResult rt_type_create_builtin(RuntimeContext* ctx, BuiltInType type) noexcept
+  ResultType stdcolt_ext_rt_type_create_builtin(
+      stdcolt_ext_rt_RuntimeContext* ctx, BuiltInType type)
   {
     if (!ctx)
       return result_type_invalid_context();
@@ -526,8 +559,8 @@ namespace stdcolt::ext::rt
     return result_type_success(&ctx->builtin_types[id]);
   }
 
-  TypeResult rt_type_create_ptr(
-      RuntimeContext* ctx, Type pointee, bool pointee_is_const) noexcept
+  ResultType stdcolt_ext_rt_type_create_ptr(
+      stdcolt_ext_rt_RuntimeContext* ctx, Type pointee, bool pointee_is_const)
   {
     if (!ctx)
       return result_type_invalid_context();
@@ -536,7 +569,7 @@ namespace stdcolt::ext::rt
     if (pointee->owner != ctx)
       return result_type_invalid_owner();
 
-    RuntimeContext::PtrKey key{pointee, pointee_is_const};
+    stdcolt_ext_rt_RuntimeContext::PtrKey key{pointee, pointee_is_const};
     if (auto it = ctx->pointer_types.find(key); it != ctx->pointer_types.end())
       return result_type_success(it->second);
 
@@ -544,7 +577,7 @@ namespace stdcolt::ext::rt
     if (!td)
       return result_type_fail_mem();
 
-    td->kind             = (uint64_t)TypeKind::KIND_POINTER;
+    td->kind             = STDCOLT_EXT_RT_TYPE_KIND_POINTER;
     td->_unused          = 0;
     td->owner            = ctx;
     td->trivial_copyable = true;
@@ -557,8 +590,8 @@ namespace stdcolt::ext::rt
     td->type_size        = sizeof(void*);
     td->type_align       = alignof(void*);
 
-    td->kind_pointer.pointee_type     = pointee;
-    td->kind_pointer.pointee_is_const = (uint64_t)pointee_is_const;
+    td->info.kind_pointer.pointee_type     = pointee;
+    td->info.kind_pointer.pointee_is_const = (uint64_t)pointee_is_const;
 
     try
     {
@@ -572,8 +605,8 @@ namespace stdcolt::ext::rt
     return result_type_success(td);
   }
 
-  TypeResult rt_type_create_array(
-      RuntimeContext* ctx, Type type, uint64_t size) noexcept
+  ResultType stdcolt_ext_rt_type_create_array(
+      stdcolt_ext_rt_RuntimeContext* ctx, Type type, uint64_t size)
   {
     if (!ctx)
       return result_type_invalid_context();
@@ -582,7 +615,7 @@ namespace stdcolt::ext::rt
     if (type->owner != ctx)
       return result_type_invalid_owner();
 
-    RuntimeContext::ArrayKey key{type, size};
+    stdcolt_ext_rt_RuntimeContext::ArrayKey key{type, size};
     if (auto it = ctx->array_types.find(key); it != ctx->array_types.end())
       return result_type_success(it->second);
 
@@ -590,7 +623,7 @@ namespace stdcolt::ext::rt
     if (!td)
       return result_type_fail_mem();
 
-    td->kind             = (uint64_t)TypeKind::KIND_ARRAY;
+    td->kind             = STDCOLT_EXT_RT_TYPE_KIND_ARRAY;
     td->trivial_copyable = type->trivial_copyable;
     td->trivial_movable  = type->trivial_movable;
     td->trivial_destroy  = type->trivial_destroy;
@@ -604,8 +637,8 @@ namespace stdcolt::ext::rt
     td->type_size  = type->type_size * size;
     td->type_align = type->type_align;
 
-    td->kind_array.array_type = type;
-    td->kind_array.size       = size;
+    td->info.kind_array.array_type = type;
+    td->info.kind_array.size       = size;
 
     try
     {
@@ -627,9 +660,11 @@ namespace stdcolt::ext::rt
     return mix64(h);
   }
 
-  TypeResult rt_type_create_fn(
-      RuntimeContext* ctx, Type ret, std::span<const Type> args) noexcept
+  ResultType stdcolt_ext_rt_type_create_fn(
+      stdcolt_ext_rt_RuntimeContext* ctx, Type ret, stdcolt_ext_rt_TypeView args_v)
   {
+    std::span<const Type> args = {args_v.data, args_v.size};
+
     if (!ctx)
       return result_type_invalid_context();
     if (ret && ret->owner != ctx)
@@ -653,11 +688,11 @@ namespace stdcolt::ext::rt
       while (node)
       {
         // tag matches by bucket key; still collision possible -> full compare
-        if (node->kind == (uint64_t)TypeKind::KIND_FUNCTION
-            && node->kind_function.return_type == ret
-            && node->kind_function.argument_count == args.size())
+        if (node->kind == STDCOLT_EXT_RT_TYPE_KIND_FUNCTION
+            && node->info.kind_function.return_type == ret
+            && node->info.kind_function.argument_count == args.size())
         {
-          auto argv = (const Type*)node->kind_function.argument_types;
+          auto argv = (const Type*)node->info.kind_function.argument_types;
           bool ok   = true;
           for (size_t i = 0; i < args.size(); ++i)
           {
@@ -683,7 +718,7 @@ namespace stdcolt::ext::rt
     if (!td)
       return result_type_fail_mem();
 
-    td->kind             = (uint64_t)TypeKind::KIND_FUNCTION;
+    td->kind             = STDCOLT_EXT_RT_TYPE_KIND_FUNCTION;
     td->_unused          = 0;
     td->trivial_copyable = true;
     td->trivial_movable  = true;
@@ -701,9 +736,9 @@ namespace stdcolt::ext::rt
     for (size_t i = 0; i < argc; ++i)
       argv[i] = args[i];
 
-    td->kind_function.return_type    = ret;
-    td->kind_function.argument_count = argc;
-    td->kind_function.argument_types = argv;
+    td->info.kind_function.return_type    = ret;
+    td->info.kind_function.argument_count = argc;
+    td->info.kind_function.argument_types = argv;
 
     // insert into bucket head (intrusive chain via opaque1)
     TypeDesc* old_head = nullptr;
@@ -725,12 +760,15 @@ namespace stdcolt::ext::rt
     return result_type_success(td);
   }
 
-  TypeResult rt_type_create(
-      RuntimeContext* ctx, std::span<const char8_t> name,
-      std::span<const Member> members, uint64_t align, uint64_t size,
+  ResultType stdcolt_ext_rt_type_create(
+      stdcolt_ext_rt_RuntimeContext* ctx, const stdcolt_ext_rt_StringView* name_v,
+      const stdcolt_ext_rt_MemberView* members_v, uint64_t align, uint64_t size,
       const NamedLifetime* lifetime, const RecipeAllocator* alloc_override,
-      const RecipePerfectHashFunction* phf_override) noexcept
+      const RecipePerfectHashFunction* phf_override)
   {
+    std::span<const char8_t> name   = {(const char8_t*)name_v->data, name_v->size};
+    std::span<const Member> members = {members_v->data, members_v->size};
+
     // TODO: handle align up size to alignment...
     if (!ctx)
       return result_type_invalid_context();
@@ -803,8 +841,8 @@ namespace stdcolt::ext::rt
       cursor = align_up_dyn(cursor, alignof(RTMemberDescription));
       cursor += sizeof(RTMemberDescription);
       // +1 for NUL terminators, for C simplicity
-      cursor += m.name.size() + 1;
-      cursor += m.description.size() + 1;
+      cursor += m.name.size + 1;
+      cursor += m.description.size + 1;
     }
 
     const size_t vtable_blob_size = cursor;
@@ -832,24 +870,24 @@ namespace stdcolt::ext::rt
     auto vtbase   = base_all + vtable_off;
     auto* vt      = (NamedTypeVTable*)vtbase;
 
-    td->kind    = (uint64_t)TypeKind::KIND_NAMED;
+    td->kind    = STDCOLT_EXT_RT_TYPE_KIND_NAMED;
     td->_unused = 0;
     td->owner   = ctx;
     td->trivial_copyable =
         lifetime->copy_fn == nullptr && (bool)lifetime->is_trivially_copyable;
     td->trivial_movable =
         lifetime->move_fn == nullptr && (bool)lifetime->is_trivially_movable;
-    td->trivial_destroy       = lifetime->destroy_fn == nullptr;
-    td->has_move_fn           = lifetime->move_fn != nullptr;
-    td->has_copy_fn           = lifetime->copy_fn != nullptr;
-    td->type_size             = size;
-    td->type_align            = align;
-    td->opaque1               = nullptr;
-    td->opaque2               = nullptr;
-    td->kind_named.vtable     = vt;
-    td->kind_named.copy_fn    = lifetime->copy_fn;
-    td->kind_named.move_fn    = lifetime->move_fn;
-    td->kind_named.destroy_fn = lifetime->destroy_fn;
+    td->trivial_destroy            = lifetime->destroy_fn == nullptr;
+    td->has_move_fn                = lifetime->move_fn != nullptr;
+    td->has_copy_fn                = lifetime->copy_fn != nullptr;
+    td->type_size                  = size;
+    td->type_align                 = align;
+    td->opaque1                    = nullptr;
+    td->opaque2                    = nullptr;
+    td->info.kind_named.vtable     = vt;
+    td->info.kind_named.copy_fn    = lifetime->copy_fn;
+    td->info.kind_named.move_fn    = lifetime->move_fn;
+    td->info.kind_named.destroy_fn = lifetime->destroy_fn;
 
     // vtable header
     vt->allocation_size = total_size;
@@ -897,8 +935,8 @@ namespace stdcolt::ext::rt
 
       for (size_t i = 0; i < n; ++i)
       {
-        keys[i].key  = members[i].name.data();
-        keys[i].size = (uint32_t)members[i].name.size();
+        keys[i].key  = members[i].name.data;
+        keys[i].size = (uint32_t)members[i].name.size;
       }
     }
 
@@ -925,22 +963,22 @@ namespace stdcolt::ext::rt
       auto* d     = (RTMemberDescription*)(vtbase + desc_cursor);
       desc_cursor += sizeof(RTMemberDescription);
 
-      const auto key_sz  = (uint32_t)m.name.size();
-      const auto desc_sz = (uint32_t)m.description.size();
+      const auto key_sz  = (uint32_t)m.name.size;
+      const auto desc_sz = (uint32_t)m.description.size;
 
       d->key_size            = key_sz;
       d->hr_description_size = desc_sz;
 
       if (key_sz != 0)
       {
-        std::memcpy(vtbase + desc_cursor, m.name.data(), (size_t)key_sz);
+        std::memcpy(vtbase + desc_cursor, m.name.data, (size_t)key_sz);
         desc_cursor += (size_t)key_sz;
       }
       vtbase[desc_cursor++] = 0;
 
       if (desc_sz != 0)
       {
-        std::memcpy(vtbase + desc_cursor, m.description.data(), (size_t)desc_sz);
+        std::memcpy(vtbase + desc_cursor, m.description.data, (size_t)desc_sz);
         desc_cursor += (size_t)desc_sz;
       }
       vtbase[desc_cursor++] = 0;
@@ -948,7 +986,7 @@ namespace stdcolt::ext::rt
       entries[i].address_or_offset = m.address_or_offset;
       entries[i].type              = m.type;
       entries[i].true_description  = d;
-      entries[i].tag               = hash_name(m.name);
+      entries[i].tag = hash_name({(const char8_t*)m.name.data, m.name.size});
     }
 
     // insert into name table
@@ -976,20 +1014,20 @@ namespace stdcolt::ext::rt
       return;
     }
 
-    switch_no_default((TypeKind)t->kind)
+    switch_no_default(t->kind)
     {
-    case TypeKind::KIND_NAMED:
+    case STDCOLT_EXT_RT_TYPE_KIND_NAMED:
     {
       STDCOLT_debug_assert(
-          t->has_move_fn && t->kind_named.move_fn, "type not movable");
-      t->kind_named.move_fn(t, dst, src);
+          t->has_move_fn && t->info.kind_named.move_fn, "type not movable");
+      t->info.kind_named.move_fn(t, dst, src);
       return;
     }
 
-    case TypeKind::KIND_ARRAY:
+    case STDCOLT_EXT_RT_TYPE_KIND_ARRAY:
     {
-      Type elem        = t->kind_array.array_type;
-      const uint64_t n = t->kind_array.size;
+      Type elem        = t->info.kind_array.array_type;
+      const uint64_t n = t->info.kind_array.size;
 
       const auto d      = (uint8_t*)dst;
       const auto s      = (uint8_t*)src;
@@ -1010,18 +1048,18 @@ namespace stdcolt::ext::rt
       return true;
     }
 
-    switch_no_default((TypeKind)t->kind)
+    switch_no_default(t->kind)
     {
-    case TypeKind::KIND_NAMED:
+    case STDCOLT_EXT_RT_TYPE_KIND_NAMED:
     {
       STDCOLT_debug_assert(
-          t->has_copy_fn && t->kind_named.copy_fn, "type not copyable");
-      return t->kind_named.copy_fn(t, dst, src);
+          t->has_copy_fn && t->info.kind_named.copy_fn, "type not copyable");
+      return t->info.kind_named.copy_fn(t, dst, src);
     }
-    case TypeKind::KIND_ARRAY:
+    case STDCOLT_EXT_RT_TYPE_KIND_ARRAY:
     {
-      Type elem        = t->kind_array.array_type;
-      const uint64_t n = t->kind_array.size;
+      Type elem        = t->info.kind_array.array_type;
+      const uint64_t n = t->info.kind_array.size;
 
       const auto d      = (uint8_t*)dst;
       const auto s      = (const uint8_t*)src;
@@ -1048,19 +1086,19 @@ namespace stdcolt::ext::rt
     if (t->trivial_destroy)
       return;
 
-    switch_no_default((TypeKind)t->kind)
+    switch_no_default(t->kind)
     {
-    case TypeKind::KIND_NAMED:
+    case STDCOLT_EXT_RT_TYPE_KIND_NAMED:
       STDCOLT_debug_assert(
-          t->kind_named.destroy_fn, "non-trivial destroy without fn");
-      t->kind_named.destroy_fn(t, obj);
+          t->info.kind_named.destroy_fn, "non-trivial destroy without fn");
+      t->info.kind_named.destroy_fn(t, obj);
       return;
 
-    case TypeKind::KIND_ARRAY:
+    case STDCOLT_EXT_RT_TYPE_KIND_ARRAY:
     {
-      Type elem         = t->kind_array.array_type;
+      Type elem         = t->info.kind_array.array_type;
       const auto p      = (uint8_t*)obj;
-      const uint64_t n  = t->kind_array.size;
+      const uint64_t n  = t->info.kind_array.size;
       const auto stride = elem->type_size;
 
       for (uint64_t i = 0; i < n; ++i)
@@ -1074,8 +1112,8 @@ namespace stdcolt::ext::rt
       const TypeDesc* self, void* out, void* src) noexcept
   {
     STDCOLT_debug_assert(
-        self && self->kind == (uint64_t)TypeKind::KIND_NAMED, "invalid param");
-    const NamedTypeVTable* vt = self->kind_named.vtable;
+        self && self->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED, "invalid param");
+    const NamedTypeVTable* vt = self->info.kind_named.vtable;
     STDCOLT_debug_assert(vt != nullptr, "corrupted named type");
 
     auto entries = vt->entries();
@@ -1091,8 +1129,8 @@ namespace stdcolt::ext::rt
       const TypeDesc* self, void* out, const void* src) noexcept
   {
     STDCOLT_debug_assert(
-        self && self->kind == (uint64_t)TypeKind::KIND_NAMED, "invalid param");
-    const NamedTypeVTable* vt = self->kind_named.vtable;
+        self && self->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED, "invalid param");
+    const NamedTypeVTable* vt = self->info.kind_named.vtable;
     STDCOLT_debug_assert(vt != nullptr, "corrupted named type");
 
     auto entries = vt->entries();
@@ -1119,8 +1157,8 @@ namespace stdcolt::ext::rt
   static void rt_runtime_named_destroy(const TypeDesc* self, void* obj) noexcept
   {
     STDCOLT_debug_assert(
-        self && self->kind == (uint64_t)TypeKind::KIND_NAMED, "invalid param");
-    const NamedTypeVTable* vt = self->kind_named.vtable;
+        self && self->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED, "invalid param");
+    const NamedTypeVTable* vt = self->info.kind_named.vtable;
     STDCOLT_debug_assert(vt != nullptr, "corrupted named type");
 
     auto entries = vt->entries();
@@ -1313,13 +1351,16 @@ namespace stdcolt::ext::rt
     }
   }
 
-  TypeResult rt_type_create_runtime(
-      RuntimeContext* ctx, std::span<const char8_t> name,
-      std::span<const MemberInfo> members, RuntimeTypeLayout layout,
+  ResultType stdcolt_ext_rt_type_create_runtime(
+      stdcolt_ext_rt_RuntimeContext* ctx, const stdcolt_ext_rt_StringView* name_v,
+      const stdcolt_ext_rt_MemberInfoView* members_v, Layout layout,
       const RecipeAllocator* alloc_override,
-      const RecipePerfectHashFunction* phf_override) noexcept
+      const RecipePerfectHashFunction* phf_override)
   {
-    if (layout >= RuntimeTypeLayout::_RuntimeTypeLayout_end)
+    std::span<const char8_t> name = {(const char8_t*)name_v->data, name_v->size};
+    std::span<const MemberInfo> members = {members_v->data, members_v->size};
+
+    if (layout >= STDCOLT_EXT_RT_LAYOUT_end)
       return result_type_invalid_param();
 
     uint64_t align   = 1;
@@ -1330,12 +1371,12 @@ namespace stdcolt::ext::rt
       return result_type_fail_mem();
 
     NamedLifetime lt{};
-    if (layout == RuntimeTypeLayout::LAYOUT_AS_DECLARED)
+    if (layout == STDCOLT_EXT_RT_LAYOUT_AS_DECLARED)
     {
       // cannot fail
       rt_type_create_runtime_as_declared(lt, align, size, members_ptr, members);
     }
-    else if (layout == RuntimeTypeLayout::LAYOUT_OPTIMIZE_SIZE_FAST)
+    else if (layout == STDCOLT_EXT_RT_LAYOUT_OPTIMIZE_SIZE_FAST)
     {
       // may fail due to allocation failure
       if (!rt_type_create_runtime_optimize_size_fast(
@@ -1346,9 +1387,9 @@ namespace stdcolt::ext::rt
       }
     }
 
-    auto type = rt_type_create(
-        ctx, name, {members_ptr, members.size()}, align, size, &lt, alloc_override,
-        phf_override);
+    auto members_out = stdcolt_ext_rt_MemberView{members_ptr, members.size()};
+    auto type        = stdcolt_ext_rt_type_create(
+        ctx, name_v, &members_out, align, size, &lt, alloc_override, phf_override);
     delete[] members_ptr;
     return type;
   }
@@ -1363,19 +1404,21 @@ namespace stdcolt::ext::rt
     return std::memcmp(a.data(), b_cstr, (size_t)b_size) == 0;
   }
 
-  LookupResult rt_type_lookup_fast(
-      Type type_to_lookup, std::span<const char8_t> name,
-      Type expected_type) noexcept
+  ResultLookup rt_type_lookup_fast(
+      Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v,
+      Type expected_type)
   {
-    if (!type_to_lookup || type_to_lookup->kind != (uint64_t)TypeKind::KIND_NAMED)
+    std::span<const char8_t> name = {(const char8_t*)name_v->data, name_v->size};
+
+    if (!type_to_lookup || type_to_lookup->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
       return lookup_expected_named();
 
-    const NamedTypeVTable* vt = type_to_lookup->kind_named.vtable;
+    const NamedTypeVTable* vt = type_to_lookup->info.kind_named.vtable;
     if (!vt || vt->count_members == 0)
       return lookup_not_found();
 
     const Key k{(const void*)name.data(), (uint32_t)name.size()};
-    const uint64_t idx = vt->phf.phf_lookup(vt->phf.state, k);
+    const uint64_t idx = vt->phf.phf_lookup(vt->phf.state, &k);
     STDCOLT_debug_assert(idx < vt->count_members, "invalid return from PHF");
 
     const auto entries            = vt->entries();
@@ -1391,20 +1434,21 @@ namespace stdcolt::ext::rt
     return lookup_found(e.address_or_offset);
   }
 
-  LookupResult rt_type_lookup(
-      Type type_to_lookup, std::span<const char8_t> name,
-      Type expected_type) noexcept
+  ResultLookup rt_type_lookup(
+      Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v,
+      Type expected_type)
   {
-    if (!type_to_lookup || type_to_lookup->kind != (uint64_t)TypeKind::KIND_NAMED)
+    std::span<const char8_t> name = {(const char8_t*)name_v->data, name_v->size};
+    if (!type_to_lookup || type_to_lookup->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
       return lookup_expected_named();
 
-    const NamedTypeVTable* vt = type_to_lookup->kind_named.vtable;
+    const NamedTypeVTable* vt = type_to_lookup->info.kind_named.vtable;
     STDCOLT_debug_assert(vt != nullptr, "corrupted type");
     if (vt->count_members == 0)
       return lookup_not_found();
 
     const Key k{(const void*)name.data(), (uint32_t)name.size()};
-    const uint64_t idx = vt->phf.phf_lookup(vt->phf.state, k);
+    const uint64_t idx = vt->phf.phf_lookup(vt->phf.state, &k);
     STDCOLT_debug_assert(idx < vt->count_members, "invalid return from PHF");
 
     const auto entries            = vt->entries();
@@ -1423,7 +1467,8 @@ namespace stdcolt::ext::rt
     return lookup_found(e.address_or_offset);
   }
 
-  bool rt_register_set_type(RuntimeContext* ctx, OpaqueTypeID id, Type type) noexcept
+  bool rt_register_set_type(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id, Type type)
   {
     if (!ctx || !id || !type || type->owner != ctx)
       return false;
@@ -1440,7 +1485,8 @@ namespace stdcolt::ext::rt
     }
   }
 
-  Type rt_register_get_type(RuntimeContext* ctx, OpaqueTypeID id) noexcept
+  Type stdcolt_ext_rt_register_get_type(
+      stdcolt_ext_rt_RuntimeContext* ctx, OpaqueTypeID id)
   {
     if (!ctx || !id)
       return nullptr;
@@ -1455,21 +1501,23 @@ namespace stdcolt::ext::rt
     return PreparedMember{nullptr, nullptr, 0, 0};
   }
 
-  PreparedMember rt_prepare_member(
-      Type owner_named, std::span<const char8_t> member_name,
-      Type expected_type) noexcept
+  PreparedMember stdcolt_ext_rt_prepare_member(
+      Type owner_named, const stdcolt_ext_rt_StringView* member_name_v,
+      Type expected_type)
   {
     PreparedMember pm{};
+    std::span<const char8_t> member_name = {
+        (const char8_t*)member_name_v->data, member_name_v->size};
 
-    if (!owner_named || owner_named->kind != (uint64_t)TypeKind::KIND_NAMED)
+    if (!owner_named || owner_named->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
       return pm_invalid();
 
-    const NamedTypeVTable* vt = owner_named->kind_named.vtable;
+    const NamedTypeVTable* vt = owner_named->info.kind_named.vtable;
     if (!vt || vt->count_members == 0 || !vt->phf.phf_lookup)
       return pm_invalid();
 
     const Key k{(const void*)member_name.data(), (uint32_t)member_name.size()};
-    const uint64_t id = vt->phf.phf_lookup(vt->phf.state, k);
+    const uint64_t id = vt->phf.phf_lookup(vt->phf.state, &k);
 
     STDCOLT_debug_assert(id < vt->count_members, "invalid return from PHF");
 
@@ -1480,12 +1528,13 @@ namespace stdcolt::ext::rt
     return pm;
   }
 
-  LookupResult rt_resolve_prepared_member(const PreparedMember& pm) noexcept
+  ResultLookup stdcolt_ext_rt_resolve_prepared_member(const PreparedMember* pm_v)
   {
-    if (!pm.owner || pm.owner->kind != (uint64_t)TypeKind::KIND_NAMED)
+    const PreparedMember& pm = *pm_v;
+    if (!pm.owner || pm.owner->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
       return lookup_expected_named();
 
-    const NamedTypeVTable* vt = pm.owner->kind_named.vtable;
+    const NamedTypeVTable* vt = pm.owner->info.kind_named.vtable;
     if (pm.tag1 >= vt->count_members)
       return lookup_not_found();
 
@@ -1499,7 +1548,7 @@ namespace stdcolt::ext::rt
     return lookup_found(e.address_or_offset);
   }
 
-  static inline Allocator ctx_allocator(RuntimeContext* ctx) noexcept
+  static inline Allocator ctx_allocator(stdcolt_ext_rt_RuntimeContext* ctx) noexcept
   {
     Allocator a{};
     a.state              = ctx->default_alloc_state.ptr();
@@ -1511,23 +1560,23 @@ namespace stdcolt::ext::rt
 
   static inline Allocator instance_allocator_for(Type type) noexcept
   {
-    RuntimeContext* ctx = type->owner;
+    stdcolt_ext_rt_RuntimeContext* ctx = type->owner;
     STDCOLT_debug_assert(ctx != nullptr, "invalid type");
 
-    switch ((TypeKind)type->kind)
+    switch (type->kind)
     {
-    case TypeKind::KIND_NAMED:
+    case STDCOLT_EXT_RT_TYPE_KIND_NAMED:
     {
-      const NamedTypeVTable* vt = type->kind_named.vtable;
+      const NamedTypeVTable* vt = type->info.kind_named.vtable;
       STDCOLT_debug_assert(vt != nullptr, "named type without vtable");
       return vt->allocator; // may be override or ctx default
     }
 
-    case TypeKind::KIND_ARRAY:
+    case STDCOLT_EXT_RT_TYPE_KIND_ARRAY:
       STDCOLT_debug_assert(
-          type->kind_array.array_type != nullptr, "array missing element type");
+          type->info.kind_array.array_type != nullptr, "array missing element type");
       // recurse so arrays of arrays end up using the base element's named allocator
-      return instance_allocator_for(type->kind_array.array_type);
+      return instance_allocator_for(type->info.kind_array.array_type);
 
     default:
       return ctx_allocator(ctx);
@@ -1545,14 +1594,15 @@ namespace stdcolt::ext::rt
   static inline void* to_address_in_sbo(Type type, void* sbo) noexcept
   {
     // fast case, object does not need padding
-    if (type->type_align <= VALUE_SBO_ALIGN && type->type_size <= VALUE_SBO_SIZE)
+    if (type->type_align <= STDCOLT_EXT_RT_VALUE_SBO_ALIGN
+        && type->type_size <= STDCOLT_EXT_RT_VALUE_SBO_SIZE)
       return sbo;
 
     // must fit EVEN WITH THE WORST CASE PADDING...
     // if not true: moving from a Value to another that are not aligned
     // in the same way may convert an inline value to a heap stored value
     // which is unacceptable due to moving always being guaranteed to succeed.
-    if (type->type_size + (type->type_align - 1) > VALUE_SBO_SIZE)
+    if (type->type_size + (type->type_align - 1) > STDCOLT_EXT_RT_VALUE_SBO_SIZE)
       return nullptr;
 
     // now safe to compute aligned placement: it will always fit
@@ -1565,19 +1615,19 @@ namespace stdcolt::ext::rt
     const auto addr = (uintptr_t)val_addr->header.address;
     const auto buf  = (uintptr_t)val_addr->inline_buffer;
     // exact check in buffer...
-    return buf <= addr && addr < buf + VALUE_SBO_SIZE;
+    return buf <= addr && addr < buf + STDCOLT_EXT_RT_VALUE_SBO_SIZE;
   }
   static inline bool is_in_heap(const Value* val_addr) noexcept
   {
     return val_addr->header.address != nullptr && !is_in_sbo(val_addr);
   }
 
-  ValueResultKind val_construct(Value* out, Type type) noexcept
+  ResultValueKind stdcolt_ext_rt_val_construct(Value* out, Type type)
   {
     if (type == nullptr)
     {
-      val_construct_empty(out);
-      return ValueResultKind::VALUE_SUCCESS;
+      stdcolt_ext_rt_val_construct_empty(out);
+      return STDCOLT_EXT_RT_VALUE_SUCCESS;
     }
 
     void* object = nullptr;
@@ -1593,21 +1643,22 @@ namespace stdcolt::ext::rt
       Allocator a = instance_allocator_for(type);
       Block blk   = a.allocator_alloc(a.state, type->type_size, type->type_align);
       if (!blk.ptr)
-        return val_construct_empty(out), ValueResultKind::VALUE_FAIL_MEMORY;
+        return stdcolt_ext_rt_val_construct_empty(out),
+               STDCOLT_EXT_RT_VALUE_FAIL_MEMORY;
       object = blk.ptr;
     }
     out->header.type    = type;
     out->header.address = object;
-    return ValueResultKind::VALUE_SUCCESS;
+    return STDCOLT_EXT_RT_VALUE_SUCCESS;
   }
 
-  void val_construct_empty(Value* out) noexcept
+  void stdcolt_ext_rt_val_construct_empty(Value* out)
   {
     out->header.address = nullptr;
     out->header.type    = nullptr;
   }
 
-  void val_construct_from_move(Value* out, Value* to_move) noexcept
+  void stdcolt_ext_rt_val_construct_from_move(Value* out, Value* to_move)
   {
     STDCOLT_pre(out != nullptr, "expected non-null parameter");
     STDCOLT_pre(to_move != nullptr, "expected non-null parameter");
@@ -1616,13 +1667,13 @@ namespace stdcolt::ext::rt
     auto type = to_move->header.type;
     // if empty, make result empty
     if (type == nullptr)
-      return val_construct_empty(out);
+      return stdcolt_ext_rt_val_construct_empty(out);
     // if in heap, we can simply copy the pointer and mark to_move empty.
     if (is_in_heap(to_move))
     {
       // copy header
       out->header = to_move->header;
-      return val_construct_empty(to_move);
+      return stdcolt_ext_rt_val_construct_empty(to_move);
     }
     // object in SBO
     STDCOLT_debug_assert(is_type_movable(type), "expected movable type");
@@ -1637,31 +1688,33 @@ namespace stdcolt::ext::rt
     else // type has a move function
     {
       STDCOLT_debug_assert(
-          type->kind == (uint8_t)TypeKind::KIND_NAMED, "expected named types");
-      type->kind_named.move_fn(type, new_addr, to_move->header.address);
+          type->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED, "expected named types");
+      type->info.kind_named.move_fn(type, new_addr, to_move->header.address);
     }
 
     out->header.type    = type;
     out->header.address = new_addr;
-    val_construct_empty(to_move);
+    stdcolt_ext_rt_val_construct_empty(to_move);
   }
 
-  ValueResultKind val_construct_from_copy(Value* out, const Value* to_copy) noexcept
+  ResultValueKind stdcolt_ext_rt_val_construct_from_copy(
+      Value* out, const Value* to_copy)
   {
     STDCOLT_pre(out != nullptr, "expected non-null parameter");
     STDCOLT_pre(to_copy != nullptr, "expected non-null parameter");
 
     // do not copy if same value
     if (to_copy == out)
-      return ValueResultKind::VALUE_SUCCESS;
+      return STDCOLT_EXT_RT_VALUE_SUCCESS;
 
     auto type = to_copy->header.type;
     // if empty, make result empty
     if (type == nullptr)
-      return val_construct_empty(out), ValueResultKind::VALUE_SUCCESS;
+      return stdcolt_ext_rt_val_construct_empty(out), STDCOLT_EXT_RT_VALUE_SUCCESS;
     // if the type is not copyable, return early...
     if (!is_type_copyable(type))
-      return val_construct_empty(out), ValueResultKind::VALUE_NOT_COPYABLE;
+      return stdcolt_ext_rt_val_construct_empty(out),
+             STDCOLT_EXT_RT_VALUE_NOT_COPYABLE;
 
     void* new_addr     = nullptr;
     bool heap_allocate = false;
@@ -1672,7 +1725,8 @@ namespace stdcolt::ext::rt
       Allocator a = instance_allocator_for(type);
       Block blk   = a.allocator_alloc(a.state, type->type_size, type->type_align);
       if (!blk.ptr)
-        return val_construct_empty(out), ValueResultKind::VALUE_FAIL_COPY;
+        return stdcolt_ext_rt_val_construct_empty(out),
+               STDCOLT_EXT_RT_VALUE_FAIL_COPY;
 
       new_addr = blk.ptr;
     }
@@ -1690,26 +1744,27 @@ namespace stdcolt::ext::rt
     else
     {
       STDCOLT_debug_assert(
-          type->kind == (uint8_t)TypeKind::KIND_NAMED, "expected named types");
+          type->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED, "expected named types");
       // if copy is not successful, clear `out` and return false
-      if (!type->kind_named.copy_fn(type, new_addr, to_copy->header.address))
+      if (!type->info.kind_named.copy_fn(type, new_addr, to_copy->header.address))
       {
         if (heap_allocate)
         {
           Allocator a = instance_allocator_for(type);
-          a.allocator_dealloc(a.state, Block{new_addr, type->type_size});
+          auto blk    = Block{new_addr, type->type_size};
+          a.allocator_dealloc(a.state, &blk);
         }
-        val_construct_empty(out);
-        return ValueResultKind::VALUE_FAIL_COPY;
+        stdcolt_ext_rt_val_construct_empty(out);
+        return STDCOLT_EXT_RT_VALUE_FAIL_COPY;
       }
     }
 
     out->header.type    = type;
     out->header.address = new_addr;
-    return ValueResultKind::VALUE_SUCCESS;
+    return STDCOLT_EXT_RT_VALUE_SUCCESS;
   }
 
-  void val_destroy(Value* val) noexcept
+  void stdcolt_ext_rt_val_destroy(Value* val)
   {
     // noop for empty values
     if (val == nullptr || val->header.type == nullptr)
@@ -1718,15 +1773,16 @@ namespace stdcolt::ext::rt
     if (!type->trivial_destroy)
     {
       STDCOLT_debug_assert(
-          type->kind == (uint8_t)TypeKind::KIND_NAMED, "expected named types");
+          type->kind == STDCOLT_EXT_RT_TYPE_KIND_NAMED, "expected named types");
       // call destructor
-      type->kind_named.destroy_fn(type, val->header.address);
+      type->info.kind_named.destroy_fn(type, val->header.address);
     }
     if (is_in_heap(val))
     {
       Allocator a = instance_allocator_for(type);
-      a.allocator_dealloc(a.state, Block{val->header.address, type->type_size});
+      auto blk    = Block{val->header.address, type->type_size};
+      a.allocator_dealloc(a.state, &blk);
     }
-    val_construct_empty(val);
+    stdcolt_ext_rt_val_construct_empty(val);
   }
 } // namespace stdcolt::ext::rt

@@ -16,101 +16,109 @@
  * This extension is specifically designed for a fixed number of members
  * per types: perfect hash functions are used for performance.
  * 
+ * This header is suitable to be consumed by C compilers.
+ * 
  * @author Raphael Dib Nehme
  * @date   December 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_EXT_RUNTIME_TYPE_RUNTIME_TYPE
 #define __HG_STDCOLT_EXT_RUNTIME_TYPE_RUNTIME_TYPE
 
+#include <stdint.h>
+#include <stdbool.h>
 #include <stdcolt_runtime_type_export.h>
-#include <stdcolt_allocators/allocator.h>
-#include <stdcolt_contracts/contracts.h>
 #include <stdcolt_runtime_type/perfect_hash_function.h>
 #include <stdcolt_runtime_type/allocator.h>
-#include <string_view>
-#include <type_traits>
-#include <span>
-#include <memory>
-#include <cstddef>
 
-namespace stdcolt::ext::rt
+#ifdef __cplusplus
+extern "C"
 {
+#endif // __cplusplus
+
   /// @brief Opaque struct managing the lifetimes of types
-  struct RuntimeContext;
+  struct stdcolt_ext_rt_RuntimeContext;
   /// @brief Opaque struct representing the VTable of named types
-  struct NamedTypeVTable;
+  struct stdcolt_ext_rt_NamedTypeVTable;
   // forward declaration
-  struct TypeDesc;
+  struct stdcolt_ext_rt_TypeDesc;
+
+  typedef struct stdcolt_ext_rt_RuntimeContext stdcolt_ext_rt_RuntimeContext;
+  typedef struct stdcolt_ext_rt_NamedTypeVTable stdcolt_ext_rt_NamedTypeVTable;
+  typedef struct stdcolt_ext_rt_TypeDesc stdcolt_ext_rt_TypeDesc;
 
   /// @brief Move function, receives `type`, `out`, `to_move`.
   /// If null, the `is_trivially_movable` bit marks the type
   /// as movable or not. A type marked trivially movable has its bits
   /// copied (using `memcpy` or such).
-  using move_fn_t = void (*)(const TypeDesc*, void*, void*) noexcept;
+  typedef void (*stdcolt_ext_rt_move_fn_t)(
+      const stdcolt_ext_rt_TypeDesc*, void*, void*);
   /// @brief Copy function, receives `type`, `out`, `to_copy`.
   /// If null, the `is_trivially_copyable` bit marks the type
   /// as copyable or not. A type marked trivially copyable has its bits
   /// copied (using `memcpy` or such).
-  using copy_fn_t = bool (*)(const TypeDesc*, void*, const void*) noexcept;
+  typedef bool (*stdcolt_ext_rt_copy_fn_t)(
+      const stdcolt_ext_rt_TypeDesc*, void*, const void*);
   /// @brief Destroy function, receives `type`, `to_destroy`.
   /// If null, then the type is assumed to have a trivial destructor,
   /// meaning that the destructor is a no-op.
-  using destroy_fn_t = void (*)(const TypeDesc*, void*) noexcept;
+  typedef void (*stdcolt_ext_rt_destroy_fn_t)(const stdcolt_ext_rt_TypeDesc*, void*);
 
-  /// @brief The type kind
-  enum class TypeKind : uint8_t
+  enum
   {
     /// @brief A named type (such as a struct/class)
-    KIND_NAMED,
+    STDCOLT_EXT_RT_TYPE_KIND_NAMED,
     /// @brief A builtin type (integers, float, and void*).
-    KIND_BUILTIN,
+    STDCOLT_EXT_RT_TYPE_KIND_BUILTIN,
     /// @brief A pointer to another type.
-    KIND_POINTER,
+    STDCOLT_EXT_RT_TYPE_KIND_POINTER,
     /// @brief A fixed size homogeneous list.
-    KIND_ARRAY,
+    STDCOLT_EXT_RT_TYPE_KIND_ARRAY,
     /// @brief A function type
-    KIND_FUNCTION,
+    STDCOLT_EXT_RT_TYPE_KIND_FUNCTION,
     /// @brief An exception.
-    KIND_EXCEPTION,
+    STDCOLT_EXT_RT_TYPE_KIND_EXCEPTION,
 
-    _TypeKind_end,
+    STDCOLT_EXT_RT_TYPE_KIND_end,
   };
+  /// @brief Suitable storage to store STDCOLT_EXT_RT_TYPE_KIND_*
+  typedef uint8_t stdcolt_ext_rt_TypeKind;
 
-  /// @brief A built-in type
-  enum class BuiltInType : uint8_t
+  enum
   {
     /// @brief Boolean type
-    TYPE_BOOL,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_BOOL,
     /// @brief Unsigned 8-bit integer
-    TYPE_U8,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_U8,
     /// @brief Unsigned 16-bit integer
-    TYPE_U16,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_U16,
     /// @brief Unsigned 32-bit integer
-    TYPE_U32,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_U32,
     /// @brief Unsigned 64-bit integer
-    TYPE_U64,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_U64,
     /// @brief Signed 8-bit integer
-    TYPE_I8,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_I8,
     /// @brief Signed 16-bit integer
-    TYPE_I16,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_I16,
     /// @brief Signed 32-bit integer
-    TYPE_I32,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_I32,
     /// @brief Signed 64-bit integer
-    TYPE_I64,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_I64,
     /// @brief 32-bit floating point integer
-    TYPE_FLOAT,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_FLOAT,
     /// @brief 64-bit floating point integer
-    TYPE_DOUBLE,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_DOUBLE,
     /// @brief Opaque (untyped) address (equivalent to `void*`)
-    TYPE_OPAQUE_ADDRESS,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_OPAQUE_ADDRESS,
     /// @brief Opaque (untyped) address (equivalent to `const void*`)
-    TYPE_CONST_OPAQUE_ADDRESS,
+    STDCOLT_EXT_RT_BUILTIN_TYPE_CONST_OPAQUE_ADDRESS,
 
-    _BuiltInType_end
+    STDCOLT_EXT_RT_BUILTIN_TYPE_end
   };
+  /// @brief Suitable storage to store STDCOLT_EXT_RT_TYPE_KIND_*
+  typedef uint8_t stdcolt_ext_rt_BuiltInType;
 
   /// @brief Type descriptor (owned by RuntimeContext)
-  struct TypeDesc
+  typedef struct stdcolt_ext_rt_TypeDesc
   {
     /// @brief The type kind
     uint64_t kind : 4;
@@ -138,7 +146,7 @@ namespace stdcolt::ext::rt
     /// @brief The size of the type (in bytes)
     uint64_t type_size;
     /// @brief The context that owns the type
-    RuntimeContext* owner;
+    stdcolt_ext_rt_RuntimeContext* owner;
 
     union
     {
@@ -146,27 +154,27 @@ namespace stdcolt::ext::rt
       struct
       {
         /// @brief The move function
-        move_fn_t move_fn;
+        stdcolt_ext_rt_move_fn_t move_fn;
         /// @brief The copy function
-        copy_fn_t copy_fn;
+        stdcolt_ext_rt_copy_fn_t copy_fn;
         /// @brief The destroy function
-        destroy_fn_t destroy_fn;
+        stdcolt_ext_rt_destroy_fn_t destroy_fn;
         /// @brief Opaque pointer to vtable for named types
-        const NamedTypeVTable* vtable;
+        const stdcolt_ext_rt_NamedTypeVTable* vtable;
       } kind_named;
 
       /// @brief Builtin type info (kind == KIND_BUILTIN)
       struct
       {
         /// @brief The builtin type
-        BuiltInType type;
+        stdcolt_ext_rt_BuiltInType type;
       } kind_builtin;
 
       /// @brief Pointer type info (kind == KIND_POINTER)
       struct
       {
         /// @brief The type pointed to
-        const TypeDesc* pointee_type;
+        const stdcolt_ext_rt_TypeDesc* pointee_type;
         /// @brief True if pointee is const
         uint64_t pointee_is_const : 1;
       } kind_pointer;
@@ -175,7 +183,7 @@ namespace stdcolt::ext::rt
       struct
       {
         /// @brief The array type
-        const TypeDesc* array_type;
+        const stdcolt_ext_rt_TypeDesc* array_type;
         /// @brief Size of the array
         uint64_t size;
       } kind_array;
@@ -184,13 +192,13 @@ namespace stdcolt::ext::rt
       struct
       {
         /// @brief The return type of the function or nullptr for void
-        const TypeDesc* return_type;
+        const stdcolt_ext_rt_TypeDesc* return_type;
         /// @brief The number of arguments of the function
         uint64_t argument_count;
         /// @brief The argument types
-        const TypeDesc** argument_types;
+        const stdcolt_ext_rt_TypeDesc** argument_types;
       } kind_function;
-    };
+    } info;
 
     // "cold" members, to keep at the end vvv
 
@@ -198,212 +206,251 @@ namespace stdcolt::ext::rt
     void* opaque1;
     /// @brief Extra data used internally
     void* opaque2;
-  };
+  } stdcolt_ext_rt_TypeDesc;
 
   /// @brief Shorthand for pointer to `TypeDesc`, pass by value.
-  using Type = const TypeDesc*;
+  typedef const stdcolt_ext_rt_TypeDesc* stdcolt_ext_rt_Type;
+
+  /// @brief View over an array of characters
+  typedef struct
+  {
+    /// @brief Pointer to the array
+    const char* data;
+    /// @brief Size of the view
+    uint64_t size;
+  } stdcolt_ext_rt_StringView;
 
   /// @brief A member, used for `rt_type_create`.
   /// The difference between `Member` and `MemberInfo` is that
   /// a `Member` is realized: it has an offset/address.
-  struct Member
+  typedef struct
   {
     /// @brief The name of the member
-    std::span<const char8_t> name;
+    stdcolt_ext_rt_StringView name;
     /// @brief The description of the member
-    std::span<const char8_t> description;
+    stdcolt_ext_rt_StringView description;
     /// @brief The type of the member
-    Type type;
+    stdcolt_ext_rt_Type type;
     /// @brief The function address or offset to the member
     uintptr_t address_or_offset;
-  };
+  } stdcolt_ext_rt_Member;
 
   /// @brief A member information, used for `rt_type_create_runtime`.
   /// The difference between `Member` and `MemberInfo` is that
   /// a `MemberInfo` is not realized: it does not have an offset/address.
-  struct MemberInfo
+  typedef struct
   {
     /// @brief The name of the member
-    std::span<const char8_t> name;
+    stdcolt_ext_rt_StringView name;
     /// @brief The description of the member
-    std::span<const char8_t> description;
+    stdcolt_ext_rt_StringView description;
     /// @brief The type of the member
-    Type type;
-  };
+    stdcolt_ext_rt_Type type;
+  } stdcolt_ext_rt_MemberInfo;
 
-  /// @brief The runtime layout for `rt_type_create_runtime`.
-  enum class RuntimeTypeLayout : uint8_t
+  /// @brief View over an array of `stdcolt_ext_rt_Member`
+  typedef struct
+  {
+    /// @brief Pointer to the array
+    const stdcolt_ext_rt_Member* data;
+    /// @brief Size of the view
+    uint64_t size;
+  } stdcolt_ext_rt_MemberView;
+
+  /// @brief View over an array of `stdcolt_ext_rt_MemberInfo`
+  typedef struct
+  {
+    /// @brief Pointer to the array
+    const stdcolt_ext_rt_MemberInfo* data;
+    /// @brief Size of the view
+    uint64_t size;
+  } stdcolt_ext_rt_MemberInfoView;
+
+  /// @brief View over an array of `stdcolt_ext_rt_Type`
+  typedef struct
+  {
+    /// @brief Pointer to the array
+    const stdcolt_ext_rt_Type* data;
+    /// @brief Size of the view
+    uint64_t size;
+  } stdcolt_ext_rt_TypeView;
+
+  enum
   {
     /// @brief Keep the layout in the order of declaration
-    LAYOUT_AS_DECLARED,
+    STDCOLT_EXT_RT_LAYOUT_AS_DECLARED,
     /// @brief Try to minimize total size using a fast heuristic.
     /// Produces near-optimal results in practice but is not guaranteed minimal.
     /// Current implementation is O(n^2).
-    LAYOUT_OPTIMIZE_SIZE_FAST,
+    STDCOLT_EXT_RT_LAYOUT_OPTIMIZE_SIZE_FAST,
 
-    _RuntimeTypeLayout_end,
+    STDCOLT_EXT_RT_LAYOUT_end,
   };
+  /// @brief The runtime layout for `rt_type_create_runtime`.
+  typedef uint8_t stdcolt_ext_rt_Layout;
+
+  /// @brief The result of the creation
+  enum
+  {
+    /// @brief Successfully created the `RuntimeContext`
+    STDCOLT_EXT_RT_CTX_SUCCESS,
+
+    // parameter checks vvv
+
+    /// @brief Invalid allocator recipe received
+    STDCOLT_EXT_RT_CTX_INVALID_ALLOCATOR,
+    /// @brief Invalid perfect hash function recipe received
+    STDCOLT_EXT_RT_CTX_INVALID_PHF,
+
+    // non-parameter checks, done after parameter checks vvv
+
+    /// @brief Could not allocate necessary memory
+    STDCOLT_EXT_RT_CTX_FAIL_MEMORY,
+    /// @brief Could not bootstrap allocator
+    STDCOLT_EXT_RT_CTX_FAIL_CREATE_ALLOCATOR,
+  };
+  /// @brief The result of the type creation
+  typedef uint8_t stdcolt_ext_rt_ResultRuntimeContextKind;
 
   /// @brief Result of the creation of a `RuntimeContext`
-  struct RuntimeContextResult
+  typedef struct
   {
-    /// @brief The result of the creation
-    enum class ResultKind : uint8_t
-    {
-      /// @brief Successfully created the `RuntimeContext`
-      RT_SUCCESS,
-
-      // parameter checks vvv
-
-      /// @brief Invalid allocator recipe received
-      RT_INVALID_ALLOCATOR,
-      /// @brief Invalid perfect hash function recipe received
-      RT_INVALID_PHF,
-
-      // non-parameter checks, done after parameter checks vvv
-
-      /// @brief Could not allocate necessary memory
-      RT_FAIL_MEMORY,
-      /// @brief Could not bootstrap allocator
-      RT_FAIL_CREATE_ALLOCATOR,
-    };
-    using enum ResultKind;
-
     /// @brief The result of `rt_create`
-    ResultKind result;
+    stdcolt_ext_rt_ResultRuntimeContextKind result;
     union
     {
-      /// @brief Only active if `result == ResultKind::RT_SUCCESS`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_CTX_SUCCESS`.
       struct
       {
         /// @brief The context
-        RuntimeContext* context;
+        stdcolt_ext_rt_RuntimeContext* context;
       } success;
 
-      /// @brief Only active if `result == ResultKind::RT_FAIL_CREATE_ALLOCATOR`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_CTX_FAIL_CREATE_ALLOCATOR`.
       struct
       {
         /// @brief Error code returned by the allocator, non-zero
         int32_t code;
       } fail_create_allocator;
-    };
-  };
+    } data;
+  } stdcolt_ext_rt_ResultRuntimeContext;
 
-  struct TypeResult
+  enum
+  {
+    /// @brief Successfully created the type
+    STDCOLT_EXT_RT_TYPE_SUCCESS,
+
+    // parameter checks vvv
+
+    /// @brief Received an invalid context (nullptr)
+    STDCOLT_EXT_RT_TYPE_INVALID_CONTEXT,
+    /// @brief Invalid allocator recipe received (named types)
+    STDCOLT_EXT_RT_TYPE_INVALID_ALLOCATOR,
+    /// @brief Invalid perfect hash function recipe received (named types)
+    STDCOLT_EXT_RT_TYPE_INVALID_PHF,
+    /// @brief Invalid owner received (owner did not match context)
+    STDCOLT_EXT_RT_TYPE_INVALID_OWNER,
+    /// @brief Invalid alignment received
+    STDCOLT_EXT_RT_TYPE_INVALID_ALIGN,
+    /// @brief Invalid parameter received, usually nullptr.
+    /// This may also be caused by a different header/compiled version
+    /// mismatch. Always verify ABI versions!
+    STDCOLT_EXT_RT_TYPE_INVALID_PARAM,
+
+    // non-parameter checks, done after parameter checks vvv
+
+    /// @brief The name of the type is already in use (named types)
+    STDCOLT_EXT_RT_TYPE_FAIL_EXISTS,
+    /// @brief Could not allocate necessary memory
+    STDCOLT_EXT_RT_TYPE_FAIL_MEMORY,
+    /// @brief Could not bootstrap allocator (named types)
+    STDCOLT_EXT_RT_TYPE_FAIL_CREATE_ALLOCATOR,
+    /// @brief Could not bootstrap perfect hash function (named types)
+    STDCOLT_EXT_RT_TYPE_FAIL_CREATE_PHF,
+  };
+  /// @brief The result of the type creation
+  typedef uint8_t stdcolt_ext_rt_ResultTypeKind;
+
+  /// @brief The result of the type creation
+  typedef struct
   {
     /// @brief The result of the type creation
-    enum class ResultKind : uint8_t
-    {
-      /// @brief Successfully created the type
-      TYPE_SUCCESS,
-
-      // parameter checks vvv
-
-      /// @brief Received an invalid context (nullptr)
-      TYPE_INVALID_CONTEXT,
-      /// @brief Invalid allocator recipe received (named types)
-      TYPE_INVALID_ALLOCATOR,
-      /// @brief Invalid perfect hash function recipe received (named types)
-      TYPE_INVALID_PHF,
-      /// @brief Invalid owner received (owner did not match context)
-      TYPE_INVALID_OWNER,
-      /// @brief Invalid alignment received
-      TYPE_INVALID_ALIGN,
-      /// @brief Invalid parameter received, usually nullptr.
-      /// This may also be caused by a different header/compiled version
-      /// mismatch. Always verify ABI versions!
-      TYPE_INVALID_PARAM,
-
-      // non-parameter checks, done after parameter checks vvv
-
-      /// @brief The name of the type is already in use (named types)
-      TYPE_FAIL_EXISTS,
-      /// @brief Could not allocate necessary memory
-      TYPE_FAIL_MEMORY,
-      /// @brief Could not bootstrap allocator (named types)
-      TYPE_FAIL_CREATE_ALLOCATOR,
-      /// @brief Could not bootstrap perfect hash function (named types)
-      TYPE_FAIL_CREATE_PHF,
-    };
-    using enum ResultKind;
-
-    /// @brief The result of the type creation
-    ResultKind result;
+    stdcolt_ext_rt_ResultTypeKind result;
 
     union
     {
-      /// @brief Only active if `result == ResultKind::TYPE_SUCCESS`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_TYPE_SUCCESS`.
       struct
       {
-        Type type;
+        stdcolt_ext_rt_Type type;
       } success;
 
-      /// @brief Only active if `result == ResultKind::TYPE_FAIL_EXISTS`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_TYPE_FAIL_EXISTS`.
       struct
       {
         /// @brief The existing type
-        Type existing_type;
+        stdcolt_ext_rt_Type existing_type;
       } fail_exists;
 
-      /// @brief Only active if `result == ResultKind::TYPE_FAIL_CREATE_ALLOCATOR`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_TYPE_FAIL_CREATE_ALLOCATOR`.
       struct
       {
         /// @brief Error code returned by the allocator, non-zero
         int32_t code;
       } fail_create_allocator;
 
-      /// @brief Only active if `result == ResultKind::TYPE_FAIL_CREATE_PHF`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_TYPE_FAIL_CREATE_PHF`.
       struct
       {
         /// @brief Error code returned by the phf, non-zero
         int32_t code;
       } fail_create_phf;
-    };
-  };
+    } data;
+  } stdcolt_ext_rt_ResultType;
 
-  /// @brief Lookup result
-  struct LookupResult
+  enum
+  {
+    /// @brief The lookup was successful: address_or_offset is valid.
+    /// If the requested member was a function, the address may be
+    /// cast to a function pointer. Else, the offset should be
+    /// added to the base address of an object to obtain a valid pointer
+    /// to the field.
+    STDCOLT_EXT_RT_LOOKUP_FOUND,
+    /// @brief The lookup was not successful, the member did not have the type requested.
+    /// The name of the member exist but has another type. The type is stored
+    /// in `mismatch_type`.
+    STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE,
+    /// @brief The lookup was not successful, the type in which to lookup is not named.
+    STDCOLT_EXT_RT_LOOKUP_EXPECTED_NAMED,
+    /// @brief The lookup was not successful, the type does not provide such a member.
+    STDCOLT_EXT_RT_LOOKUP_NOT_FOUND,
+  };
+  /// @brief The result of the lookup
+  typedef uint8_t stdcolt_ext_rt_ResultLookupKind;
+
+  /// @brief The result of the lookup
+  typedef struct
   {
     /// @brief The result of the lookup
-    enum class ResultKind : uint8_t
-    {
-      /// @brief The lookup was successful: address_or_offset is valid.
-      /// If the requested member was a function, the address may be
-      /// cast to a function pointer. Else, the offset should be
-      /// added to the base address of an object to obtain a valid pointer
-      /// to the field.
-      LOOKUP_FOUND,
-      /// @brief The lookup was not successful, the member did not have the type requested.
-      /// The name of the member exist but has another type. The type is stored
-      /// in `mismatch_type`.
-      LOOKUP_MISMATCH_TYPE,
-      /// @brief The lookup was not successful, the type in which to lookup is not named.
-      LOOKUP_EXPECTED_NAMED,
-      /// @brief The lookup was not successful, the type does not provide such a member.
-      LOOKUP_NOT_FOUND,
-    };
-    using enum ResultKind;
-
-    /// @brief The result of the lookup
-    ResultKind result;
+    stdcolt_ext_rt_ResultLookupKind result;
 
     union
     {
-      /// @brief Only active if `result == ResultKind::LOOKUP_FOUND`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_LOOKUP_FOUND`.
       struct
       {
         /// @brief The address of the function, or offset to the field
         uintptr_t address_or_offset;
       } found;
 
-      /// @brief Only active if `result == ResultKind::MISMATCH_TYPE`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_MISMATCH_TYPE`.
       struct
       {
         /// @brief The actual type of the member
-        Type actual_type;
+        stdcolt_ext_rt_Type actual_type;
       } mismatch_type;
-    };
-  };
+    } data;
+  } stdcolt_ext_rt_ResultLookup;
 
   /// @brief Creates a RuntimeContext.
   /// @param alloc The allocator to use for all VTable allocations
@@ -411,42 +458,42 @@ namespace stdcolt::ext::rt
   /// @return RuntimeContextResult.
   /// To prevent memory leaks, use `rt_destroy` on the resulting non-null context.
   STDCOLT_RUNTIME_TYPE_EXPORT
-  RuntimeContextResult rt_create(
-      const RecipeAllocator* alloc         = nullptr,
-      const RecipePerfectHashFunction* phf = nullptr) noexcept;
+  stdcolt_ext_rt_ResultRuntimeContext stdcolt_ext_rt_create(
+      const stdcolt_ext_rt_RecipeAllocator* alloc,
+      const stdcolt_ext_rt_RecipePerfectHashFunction* phf);
 
   /// @brief Destroys all resources associated with a `RuntimeContext`.
   /// @warning Any usage of the context afterwards causes UB!
   /// @param ctx The context (or nullptr)
   STDCOLT_RUNTIME_TYPE_EXPORT
-  void rt_destroy(RuntimeContext* ctx) noexcept;
+  void stdcolt_ext_rt_destroy(stdcolt_ext_rt_RuntimeContext* ctx);
 
   /*****************************/
   // NAMED AND RUNTIME LAYOUT
   /*****************************/
 
   /// @brief Type erased functions to manage the lifetime of an object
-  struct NamedLifetime
+  typedef struct
   {
     /// @brief Move function, receives `type`, `out`, `to_move`.
     /// If null, the `is_trivially_movable` bit marks the type
     /// as movable or not. A type marked trivially movable has its bits
     /// copied (using `memcpy` or such).
-    move_fn_t move_fn;
+    stdcolt_ext_rt_move_fn_t move_fn;
     /// @brief Copy function, receives `type`, `out`, `to_copy`.
     /// If null, the `is_trivially_copyable` bit marks the type
     /// as copyable or not. A type marked trivially copyable has its bits
     /// copied (using `memcpy` or such).
-    copy_fn_t copy_fn;
+    stdcolt_ext_rt_copy_fn_t copy_fn;
     /// @brief Destroy function, receives `type`, `to_destroy`.
     /// If null, then the type is assumed to have a trivial destructor,
     /// meaning that the destructor is a no-op.
-    destroy_fn_t destroy_fn;
+    stdcolt_ext_rt_destroy_fn_t destroy_fn;
     /// @brief Only read if `move_fn` is null, marks a type as trivially movable.
     uint64_t is_trivially_movable : 1;
     /// @brief Only read if `copy_fn` is null, marks a type as trivially copyable.
     uint64_t is_trivially_copyable : 1;
-  };
+  } stdcolt_ext_rt_NamedLifetime;
 
   /// @brief Creates a named type from members
   /// @param ctx The context that owns the resulting type (not null!)
@@ -461,11 +508,12 @@ namespace stdcolt::ext::rt
   /// If this parameter is null, the default perfect hash function of the RuntimeContext is used.
   /// @return A Type or an error type on invalid parameters.
   STDCOLT_RUNTIME_TYPE_EXPORT
-  TypeResult rt_type_create(
-      RuntimeContext* ctx, std::span<const char8_t> name,
-      std::span<const Member> members, uint64_t align, uint64_t size,
-      const NamedLifetime* lifetime, const RecipeAllocator* alloc_override = nullptr,
-      const RecipePerfectHashFunction* phf_override = nullptr) noexcept;
+  stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create(
+      stdcolt_ext_rt_RuntimeContext* ctx, const stdcolt_ext_rt_StringView* name,
+      const stdcolt_ext_rt_MemberView* members, uint64_t align, uint64_t size,
+      const stdcolt_ext_rt_NamedLifetime* lifetime,
+      const stdcolt_ext_rt_RecipeAllocator* alloc_override,
+      const stdcolt_ext_rt_RecipePerfectHashFunction* phf_override);
 
   /// @brief Creates a named type from a list of fields.
   /// This computes the offsets of the fields at runtime, then
@@ -480,11 +528,11 @@ namespace stdcolt::ext::rt
   /// If this parameter is null, the default perfect hash function of the RuntimeContext is used.
   /// @return A Type or an error type on invalid parameters.
   STDCOLT_RUNTIME_TYPE_EXPORT
-  TypeResult rt_type_create_runtime(
-      RuntimeContext* ctx, std::span<const char8_t> name,
-      std::span<const MemberInfo> members, RuntimeTypeLayout layout,
-      const RecipeAllocator* alloc_override         = nullptr,
-      const RecipePerfectHashFunction* phf_override = nullptr) noexcept;
+  stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_runtime(
+      stdcolt_ext_rt_RuntimeContext* ctx, const stdcolt_ext_rt_StringView* name,
+      const stdcolt_ext_rt_MemberInfoView* members, stdcolt_ext_rt_Layout layout,
+      const stdcolt_ext_rt_RecipeAllocator* alloc_override,
+      const stdcolt_ext_rt_RecipePerfectHashFunction* phf_override);
 
   /// @brief Does a fast lookup for a member.
   /// Fast lookups do not verify the actual name of the member, its
@@ -499,9 +547,9 @@ namespace stdcolt::ext::rt
   /// @param expected_type The expected type of the member
   /// @return LookupResult
   STDCOLT_RUNTIME_TYPE_EXPORT
-  LookupResult rt_type_lookup_fast(
-      Type type_to_lookup, std::span<const char8_t> name,
-      Type expected_type) noexcept;
+  stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_type_lookup_fast(
+      stdcolt_ext_rt_Type type_to_lookup, const stdcolt_ext_rt_StringView* name,
+      stdcolt_ext_rt_Type expected_type);
 
   /// @brief Does a lookup for a member.
   /// This function is guaranteed to never generate false positives:
@@ -511,9 +559,9 @@ namespace stdcolt::ext::rt
   /// @param expected_type The expected type of the member
   /// @return LookupResult
   STDCOLT_RUNTIME_TYPE_EXPORT
-  LookupResult rt_type_lookup(
-      Type type_to_lookup, std::span<const char8_t> name,
-      Type expected_type) noexcept;
+  stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_type_lookup(
+      stdcolt_ext_rt_Type type_to_lookup, const stdcolt_ext_rt_StringView* name,
+      stdcolt_ext_rt_Type expected_type);
 
   /*****************************/
   // BUILTIN TYPES
@@ -524,7 +572,8 @@ namespace stdcolt::ext::rt
   /// @param type The built-in type kind
   /// @return built-in type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  TypeResult rt_type_create_builtin(RuntimeContext* ctx, BuiltInType type) noexcept;
+  stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_builtin(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_BuiltInType type);
 
   /// @brief Creates a pointer to a type
   /// @param ctx The context that owns the resulting type (not null!)
@@ -532,8 +581,9 @@ namespace stdcolt::ext::rt
   /// @param pointee_is_const If true, the pointer to const
   /// @return pointer type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  TypeResult rt_type_create_ptr(
-      RuntimeContext* ctx, Type pointee, bool pointee_is_const) noexcept;
+  stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_ptr(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_Type pointee,
+      bool pointee_is_const);
 
   /// @brief Creates an array of a type
   /// @param ctx The context that owns the resulting type (not null!)
@@ -541,8 +591,8 @@ namespace stdcolt::ext::rt
   /// @param size The size of the array
   /// @return array type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  TypeResult rt_type_create_array(
-      RuntimeContext* ctx, Type type, uint64_t size) noexcept;
+  stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_array(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_Type type, uint64_t size);
 
   /// @brief Creates a function type
   /// @param ctx The context that owns the resulting type (not null!)
@@ -550,15 +600,16 @@ namespace stdcolt::ext::rt
   /// @param args The argument types of the function (none null and all owned by ctx)
   /// @return function type
   STDCOLT_RUNTIME_TYPE_EXPORT
-  TypeResult rt_type_create_fn(
-      RuntimeContext* ctx, Type ret, std::span<const Type> args) noexcept;
+  stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_fn(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_Type ret,
+      stdcolt_ext_rt_TypeView args);
 
   /*****************************/
   // OPAQUE TYPE IDs
   /*****************************/
 
   /// @brief An opaque type ID, that may be mapped to a `Type`
-  using OpaqueTypeID = const void*;
+  typedef const void* stdcolt_ext_rt_OpaqueTypeID;
 
   /// @brief Registers a type for a specific opaque type ID
   /// @param ctx The context in which to register
@@ -566,15 +617,17 @@ namespace stdcolt::ext::rt
   /// @param type The type to register
   /// @return True on success
   STDCOLT_RUNTIME_TYPE_EXPORT
-  bool rt_register_set_type(
-      RuntimeContext* ctx, OpaqueTypeID id, Type type) noexcept;
+  bool stdcolt_ext_rt_register_set_type(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id,
+      stdcolt_ext_rt_Type type);
 
   /// @brief Returns a type previously registered
   /// @param ctx The context in which to lookup
   /// @param id The opaque ID used on registration
   /// @return The registered type or nullptr
   STDCOLT_RUNTIME_TYPE_EXPORT
-  Type rt_register_get_type(RuntimeContext* ctx, OpaqueTypeID id) noexcept;
+  stdcolt_ext_rt_Type stdcolt_ext_rt_register_get_type(
+      stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id);
 
   /*****************************/
   // PREPARED MEMBER
@@ -586,17 +639,17 @@ namespace stdcolt::ext::rt
   /// When accessing the same member multiple times, either cache the obtained
   /// pointer (this is the fastest), or create and reuse a `PreparedMember`.
   /// A prepared member is valid for the lifetime of the type it was prepared for.
-  struct PreparedMember
+  typedef struct
   {
     /// @brief The type whose member to access
-    Type owner;
+    stdcolt_ext_rt_Type owner;
     /// @brief Expected member type
-    Type expected;
+    stdcolt_ext_rt_Type expected;
     /// @brief Index of member (internal tag, do not modify!)
     uint64_t tag1;
     /// @brief Hash of member (internal tag, do not modify!)
     uint64_t tag2;
-  };
+  } stdcolt_ext_rt_PreparedMember;
 
   /// @brief Creates a prepared member for faster repeated accesses to the same member.
   /// A prepared member allows faster lookups: use `rt_resolve_prepared_member`.
@@ -605,63 +658,69 @@ namespace stdcolt::ext::rt
   /// @param expected_type The expected type of the member
   /// @return PreparedMember
   STDCOLT_RUNTIME_TYPE_EXPORT
-  PreparedMember rt_prepare_member(
-      Type owner_named, std::span<const char8_t> member_name,
-      Type expected_type) noexcept;
+  stdcolt_ext_rt_PreparedMember stdcolt_ext_rt_prepare_member(
+      stdcolt_ext_rt_Type owner_named, const stdcolt_ext_rt_StringView* member_name,
+      stdcolt_ext_rt_Type expected_type);
 
   /// @brief Resolves a lookup from a prepared member
   /// @param pm The prepared member, obtained from `rt_prepare_member`.
   /// @return LookupResult
   STDCOLT_RUNTIME_TYPE_EXPORT
-  LookupResult rt_resolve_prepared_member(const PreparedMember& pm) noexcept;
+  stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_resolve_prepared_member(
+      const stdcolt_ext_rt_PreparedMember* pm);
 
   /*****************************/
   // VALUE AND LIFETIME
   /*****************************/
 
   /// @brief Header of all values
-  struct ValueHeader
+  typedef struct
   {
     /// @brief Type of the value or nullptr for empty Value.
     /// Do not modify manually!
-    Type type;
+    stdcolt_ext_rt_Type type;
     /// @brief Pointer to the value, which is either inline or on the heap.
     /// This address is used to avoid branching. Do not modify manually!
-    /// @pre Must never be null of type is not null.
+    /// @pre Must never be null if type is not null.
     void* address;
-  };
+  } stdcolt_ext_rt_ValueHeader;
+
+  // TODO: handle alignment properly
 
   /// @brief Alignment (in bytes) of inline buffer of `Value`.
   /// @warning Modification causes an ABI break!
-  static constexpr size_t VALUE_SBO_ALIGN = alignof(ValueHeader);
+#define STDCOLT_EXT_RT_VALUE_SBO_ALIGN (sizeof(void*))
   /// @brief Size (in bytes) of inline buffer of `Value`.
   /// @warning Modification causes an ABI break!
-  static constexpr size_t VALUE_SBO_SIZE = 128 - sizeof(ValueHeader);
+#define STDCOLT_EXT_RT_VALUE_SBO_SIZE (128 - sizeof(stdcolt_ext_rt_ValueHeader))
 
   /// @brief Runtime value of any time
-  struct Value
+  typedef struct
   {
     /// @brief Common header for all Value, may be read without methods.
     /// Write to any of its member is UB.
-    ValueHeader header;
+    stdcolt_ext_rt_ValueHeader header;
 
     /// @brief Inline buffer used for Small Buffer Optimization (SBO).
     /// Accessing (read/write) is UB, only use methods!
-    alignas(VALUE_SBO_ALIGN) uint8_t inline_buffer[VALUE_SBO_SIZE];
-  };
+    uint8_t inline_buffer[STDCOLT_EXT_RT_VALUE_SBO_SIZE];
+  } stdcolt_ext_rt_Value;
 
   /// @brief The result of fallible operations on `Value`
-  enum class ValueResultKind : uint8_t
+  enum
   {
     /// @brief Success
-    VALUE_SUCCESS,
+    STDCOLT_EXT_RT_VALUE_SUCCESS,
     /// @brief Could not allocate necessary memory
-    VALUE_FAIL_MEMORY,
+    STDCOLT_EXT_RT_VALUE_FAIL_MEMORY,
     /// @brief The copy function failed
-    VALUE_FAIL_COPY,
+    STDCOLT_EXT_RT_VALUE_FAIL_COPY,
     /// @brief Type is not copyable
-    VALUE_NOT_COPYABLE,
+    STDCOLT_EXT_RT_VALUE_NOT_COPYABLE,
+
+    STDCOLT_EXT_RT_VALUE_end
   };
+  typedef uint8_t stdcolt_ext_rt_ResultValueKind;
 
   /// @brief Initialize the storage of a `Value` for a specific type.
   /// This function does not initialize the stored value: this is not
@@ -673,7 +732,8 @@ namespace stdcolt::ext::rt
   /// @return True on success, else failure
   /// @pre `out` may not be null, else UB!
   STDCOLT_RUNTIME_TYPE_EXPORT
-  ValueResultKind val_construct(Value* out, Type type) noexcept;
+  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_val_construct(
+      stdcolt_ext_rt_Value* out, stdcolt_ext_rt_Type type);
 
   /// @brief Constructs an empty `Value`.
   /// Empty values do not need to be destroyed, and have `header.type == null`.
@@ -681,14 +741,15 @@ namespace stdcolt::ext::rt
   /// @param out The value to initialize
   /// @pre No parameter may be null, else UB!
   STDCOLT_RUNTIME_TYPE_EXPORT
-  void val_construct_empty(Value* out) noexcept;
+  void stdcolt_ext_rt_val_construct_empty(stdcolt_ext_rt_Value* out);
 
   /// @brief Constructs a `Value` by stealing the storage from another `Value`.
   /// The moved-from value is marked empty, as if initialized by `val_construct_empty`.
   /// @param out The value to initialize (out param)
   /// @param to_move `Value` from which to steal the storage, marked empty after the call
   STDCOLT_RUNTIME_TYPE_EXPORT
-  void val_construct_from_move(Value* out, Value* to_move) noexcept;
+  void stdcolt_ext_rt_val_construct_from_move(
+      stdcolt_ext_rt_Value* out, stdcolt_ext_rt_Value* to_move);
 
   /// @brief Tries to copy a `Value` to another.
   /// For a copy to be successful, the type stored in `to_copy` must support
@@ -699,12 +760,16 @@ namespace stdcolt::ext::rt
   /// @return True on success, false on failure
   /// @pre No parameter may be null, else UB!
   STDCOLT_RUNTIME_TYPE_EXPORT
-  ValueResultKind val_construct_from_copy(Value* out, const Value* to_copy) noexcept;
+  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_val_construct_from_copy(
+      stdcolt_ext_rt_Value* out, const stdcolt_ext_rt_Value* to_copy);
 
   /// @brief Destroys the stored value then the storage of a Value.
   /// @param val Value to destroy (or null), marked empty afterwards
   STDCOLT_RUNTIME_TYPE_EXPORT
-  void val_destroy(Value* val) noexcept;
-} // namespace stdcolt::ext::rt
+  void stdcolt_ext_rt_val_destroy(stdcolt_ext_rt_Value* val);
+
+#ifdef __cplusplus
+}
+#endif // !__cplusplus
 
 #endif
