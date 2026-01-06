@@ -39,243 +39,239 @@ using ResultLookup         = stdcolt_ext_rt_ResultLookup;
 using ResultRuntimeContext = stdcolt_ext_rt_ResultRuntimeContext;
 using ResultType           = stdcolt_ext_rt_ResultType;
 
-extern "C"
+static void noop_destruct(void*) noexcept
 {
-  static void noop_destruct(void*) noexcept
+  // does nothing
+}
+
+static constexpr size_t BUILTIN_COUNT = (size_t)STDCOLT_EXT_RT_BUILTIN_TYPE_end;
+
+static inline bool is_pow2(size_t n) noexcept
+{
+  return n != 0 && (n & (n - 1)) == 0;
+}
+
+static inline size_t align_up_dyn(size_t v, size_t align) noexcept
+{
+  // caller guarantees power of two and align >= 1
+  return (v + (align - 1)) & ~(align - 1);
+}
+
+static inline bool phf_recipe_valid(
+    const stdcolt_ext_rt_RecipePerfectHashFunction& r) noexcept
+{
+  return r.phf_alignof >= 1 && r.phf_sizeof >= 1 && is_pow2(r.phf_alignof)
+         && r.phf_construct != nullptr && r.phf_destruct != nullptr
+         && r.phf_lookup != nullptr;
+}
+
+static inline bool alloc_recipe_valid(
+    const stdcolt_ext_rt_RecipeAllocator& r) noexcept
+{
+  return r.allocator_alignof >= 1 && is_pow2(r.allocator_alignof)
+         && r.allocator_construct != nullptr && r.allocator_destruct != nullptr
+         && r.allocator_alloc != nullptr && r.allocator_dealloc != nullptr;
+}
+
+static inline std::u8string to_u8string(std::span<const char8_t> s)
+{
+  return std::u8string(s.data(), s.size());
+}
+
+// SplitMix64
+static inline uint64_t mix64(uint64_t x) noexcept
+{
+  x += 0x9e3779b97f4a7c15ULL;
+  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+  x = x ^ (x >> 31);
+  return x;
+}
+
+static inline uint64_t load_u64_unaligned(const uint8_t* p) noexcept
+{
+  uint64_t v;
+  std::memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+static inline uint64_t load_tail_u64(const uint8_t* p, size_t len) noexcept
+{
+  // len in [0,8]
+  uint64_t v = 0;
+  if (len)
+    std::memcpy(&v, p, len);
+  return v;
+}
+
+static inline uint64_t hash_name(std::span<const char8_t> s) noexcept
+{
+  // TODO: check me
+  const size_t len = s.size();
+  auto p           = (const uint8_t*)s.data();
+
+  uint64_t h = mix64(len);
+
+  if (len == 0)
+    return h;
+
+  if (len <= 8)
   {
-    // does nothing
+    const uint64_t a = load_tail_u64(p, len);
+    return mix64(h ^ mix64(a));
   }
 
-  static constexpr size_t BUILTIN_COUNT = (size_t)STDCOLT_EXT_RT_BUILTIN_TYPE_end;
+  const uint64_t first = load_u64_unaligned(p);
+  const uint64_t last  = load_u64_unaligned(p + len - 8);
 
-  static inline bool is_pow2(size_t n) noexcept
+  if (len <= 16)
   {
-    return n != 0 && (n & (n - 1)) == 0;
-  }
-
-  static inline size_t align_up_dyn(size_t v, size_t align) noexcept
-  {
-    // caller guarantees power of two and align >= 1
-    return (v + (align - 1)) & ~(align - 1);
-  }
-
-  static inline bool phf_recipe_valid(
-      const stdcolt_ext_rt_RecipePerfectHashFunction& r) noexcept
-  {
-    return r.phf_alignof >= 1 && r.phf_sizeof >= 1 && is_pow2(r.phf_alignof)
-           && r.phf_construct != nullptr && r.phf_destruct != nullptr
-           && r.phf_lookup != nullptr;
-  }
-
-  static inline bool alloc_recipe_valid(
-      const stdcolt_ext_rt_RecipeAllocator& r) noexcept
-  {
-    return r.allocator_alignof >= 1 && is_pow2(r.allocator_alignof)
-           && r.allocator_construct != nullptr && r.allocator_destruct != nullptr
-           && r.allocator_alloc != nullptr && r.allocator_dealloc != nullptr;
-  }
-
-  static inline std::u8string to_u8string(std::span<const char8_t> s)
-  {
-    return std::u8string(s.data(), s.size());
-  }
-
-  // SplitMix64
-  static inline uint64_t mix64(uint64_t x) noexcept
-  {
-    x += 0x9e3779b97f4a7c15ULL;
-    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
-    x = x ^ (x >> 31);
-    return x;
-  }
-
-  static inline uint64_t load_u64_unaligned(const uint8_t* p) noexcept
-  {
-    uint64_t v;
-    std::memcpy(&v, p, sizeof(v));
-    return v;
-  }
-
-  static inline uint64_t load_tail_u64(const uint8_t* p, size_t len) noexcept
-  {
-    // len in [0,8]
-    uint64_t v = 0;
-    if (len)
-      std::memcpy(&v, p, len);
-    return v;
-  }
-
-  static inline uint64_t hash_name(std::span<const char8_t> s) noexcept
-  {
-    // TODO: check me
-    const size_t len = s.size();
-    auto p           = (const uint8_t*)s.data();
-
-    uint64_t h = mix64(len);
-
-    if (len == 0)
-      return h;
-
-    if (len <= 8)
-    {
-      const uint64_t a = load_tail_u64(p, len);
-      return mix64(h ^ mix64(a));
-    }
-
-    const uint64_t first = load_u64_unaligned(p);
-    const uint64_t last  = load_u64_unaligned(p + len - 8);
-
-    if (len <= 16)
-    {
-      h ^= mix64(first) ^ mix64(last);
-      return mix64(h);
-    }
-
-    const uint64_t near_start = load_u64_unaligned(p + 8);
-    const size_t mid_off      = (len / 2) - 4;
-    const uint64_t mid        = load_u64_unaligned(p + mid_off);
-
-    h ^= mix64(first) ^ mix64(near_start) ^ mix64(mid) ^ mix64(last);
-
-    if (len > 32)
-    {
-      const uint64_t near_end = load_u64_unaligned(p + len - 16);
-      h ^= mix64(near_end);
-    }
+    h ^= mix64(first) ^ mix64(last);
     return mix64(h);
   }
 
-  struct transparent_u8_hash
-  {
-    using is_transparent = void;
-    using hash_type      = std::hash<std::u8string_view>;
+  const uint64_t near_start = load_u64_unaligned(p + 8);
+  const size_t mid_off      = (len / 2) - 4;
+  const uint64_t mid        = load_u64_unaligned(p + mid_off);
 
-    size_t operator()(std::u8string_view sv) const noexcept
+  h ^= mix64(first) ^ mix64(near_start) ^ mix64(mid) ^ mix64(last);
+
+  if (len > 32)
+  {
+    const uint64_t near_end = load_u64_unaligned(p + len - 16);
+    h ^= mix64(near_end);
+  }
+  return mix64(h);
+}
+
+struct transparent_u8_hash
+{
+  using is_transparent = void;
+  using hash_type      = std::hash<std::u8string_view>;
+
+  size_t operator()(std::u8string_view sv) const noexcept { return hash_type{}(sv); }
+  size_t operator()(std::span<const char8_t> sv) const noexcept
+  {
+    return hash_type{}(std::u8string_view{sv.data(), sv.size()});
+  }
+  size_t operator()(const char8_t* s) const noexcept
+  {
+    return hash_type{}(std::u8string_view{s});
+  }
+  size_t operator()(const std::u8string& s) const noexcept
+  {
+    return hash_type{}(std::u8string_view{s});
+  }
+};
+
+struct RTMemberDescription
+{
+  uint32_t key_size;
+  uint32_t hr_description_size;
+
+  std::span<const char8_t> key() const noexcept { return {key_c_str(), key_size}; }
+  std::span<const char8_t> description() const noexcept
+  {
+    return {description_c_str(), hr_description_size};
+  }
+
+  const char8_t* key_c_str() const noexcept
+  {
+    return (const char8_t*)(this) + sizeof(RTMemberDescription);
+  }
+  const char8_t* description_c_str() const noexcept
+  {
+    return key_c_str() + (size_t)key_size + 1; // +1 for NUL
+  }
+};
+
+struct NamedTypeVTableEntry
+{
+  uintptr_t address_or_offset;
+  uint64_t tag; // hash(name) for fast checks
+  Type type;    // exact type pointer for safety
+  RTMemberDescription* true_description;
+};
+
+struct stdcolt_ext_rt_NamedTypeVTable
+{
+  uint64_t allocation_size;
+
+  Allocator allocator;
+  PerfectHashFunction phf;
+
+  uint64_t count_members;
+  uint32_t entries_offset;
+  uint32_t _padding;
+
+  std::span<const NamedTypeVTableEntry> entries() const noexcept
+  {
+    return {
+        (const NamedTypeVTableEntry*)((const uint8_t*)this + entries_offset),
+        count_members};
+  }
+};
+
+struct stdcolt_ext_rt_RuntimeContext
+{
+  RecipeAllocator default_alloc_recipe{};
+  alloc::Block default_alloc_state = {};
+  RecipePerfectHashFunction default_phf_recipe{};
+
+  std::unordered_map<std::u8string, TypeDesc*, transparent_u8_hash, std::equal_to<>>
+      types_table;
+  std::unordered_map<OpaqueTypeID, Type> registered_type_table;
+  TypeDesc builtin_types[BUILTIN_COUNT]{};
+
+  struct PtrKey
+  {
+    Type pointee;
+    bool pointee_const;
+  };
+
+  struct ArrayKey
+  {
+    Type pointee;
+    uint64_t size;
+  };
+
+  struct KeyHash
+  {
+    size_t operator()(const PtrKey& k) const noexcept
     {
-      return hash_type{}(sv);
+      uint64_t h = mix64((uint64_t)k.pointee);
+      h ^= mix64((uint64_t)k.pointee_const);
+      return h;
     }
-    size_t operator()(std::span<const char8_t> sv) const noexcept
+
+    size_t operator()(const ArrayKey& k) const noexcept
     {
-      return hash_type{}(std::u8string_view{sv.data(), sv.size()});
-    }
-    size_t operator()(const char8_t* s) const noexcept
-    {
-      return hash_type{}(std::u8string_view{s});
-    }
-    size_t operator()(const std::u8string& s) const noexcept
-    {
-      return hash_type{}(std::u8string_view{s});
+      uint64_t h = mix64((uint64_t)k.pointee);
+      h ^= mix64(k.size);
+      return h;
     }
   };
 
-  struct RTMemberDescription
+  struct KeyEq
   {
-    uint32_t key_size;
-    uint32_t hr_description_size;
-
-    std::span<const char8_t> key() const noexcept { return {key_c_str(), key_size}; }
-    std::span<const char8_t> description() const noexcept
+    bool operator()(const PtrKey& a, const PtrKey& b) const noexcept
     {
-      return {description_c_str(), hr_description_size};
+      return a.pointee == b.pointee && a.pointee_const == b.pointee_const;
     }
-
-    const char8_t* key_c_str() const noexcept
+    bool operator()(const ArrayKey& a, const ArrayKey& b) const noexcept
     {
-      return (const char8_t*)(this) + sizeof(RTMemberDescription);
-    }
-    const char8_t* description_c_str() const noexcept
-    {
-      return key_c_str() + (size_t)key_size + 1; // +1 for NUL
+      return a.pointee == b.pointee && a.size == b.size;
     }
   };
 
-  struct NamedTypeVTableEntry
-  {
-    uintptr_t address_or_offset;
-    uint64_t tag; // hash(name) for fast checks
-    Type type;    // exact type pointer for safety
-    RTMemberDescription* true_description;
-  };
+  std::unordered_map<PtrKey, TypeDesc*, KeyHash, KeyEq> pointer_types;
+  std::unordered_map<ArrayKey, TypeDesc*, KeyHash, KeyEq> array_types;
+  std::unordered_map<uint64_t, TypeDesc*> function_buckets;
+  std::atomic<uint64_t> type_id_generator{1};
+};
 
-  struct stdcolt_ext_rt_NamedTypeVTable
-  {
-    uint64_t allocation_size;
-
-    Allocator allocator;
-    PerfectHashFunction phf;
-
-    uint64_t count_members;
-    uint32_t entries_offset;
-    uint32_t _padding;
-
-    std::span<const NamedTypeVTableEntry> entries() const noexcept
-    {
-      return {
-          (const NamedTypeVTableEntry*)((const uint8_t*)this + entries_offset),
-          count_members};
-    }
-  };
-
-  struct stdcolt_ext_rt_RuntimeContext
-  {
-    RecipeAllocator default_alloc_recipe{};
-    alloc::Block default_alloc_state = {};
-    RecipePerfectHashFunction default_phf_recipe{};
-
-    std::unordered_map<
-        std::u8string, TypeDesc*, transparent_u8_hash, std::equal_to<>>
-        types_table;
-    std::unordered_map<OpaqueTypeID, Type> registered_type_table;
-    TypeDesc builtin_types[BUILTIN_COUNT]{};
-
-    struct PtrKey
-    {
-      Type pointee;
-      bool pointee_const;
-    };
-
-    struct ArrayKey
-    {
-      Type pointee;
-      uint64_t size;
-    };
-
-    struct KeyHash
-    {
-      size_t operator()(const PtrKey& k) const noexcept
-      {
-        uint64_t h = mix64((uint64_t)k.pointee);
-        h ^= mix64((uint64_t)k.pointee_const);
-        return h;
-      }
-
-      size_t operator()(const ArrayKey& k) const noexcept
-      {
-        uint64_t h = mix64((uint64_t)k.pointee);
-        h ^= mix64(k.size);
-        return h;
-      }
-    };
-
-    struct KeyEq
-    {
-      bool operator()(const PtrKey& a, const PtrKey& b) const noexcept
-      {
-        return a.pointee == b.pointee && a.pointee_const == b.pointee_const;
-      }
-      bool operator()(const ArrayKey& a, const ArrayKey& b) const noexcept
-      {
-        return a.pointee == b.pointee && a.size == b.size;
-      }
-    };
-
-    std::unordered_map<PtrKey, TypeDesc*, KeyHash, KeyEq> pointer_types;
-    std::unordered_map<ArrayKey, TypeDesc*, KeyHash, KeyEq> array_types;
-    std::unordered_map<uint64_t, TypeDesc*> function_buckets;
-    std::atomic<uint64_t> type_id_generator{1};
-  };
-
+extern "C"
+{
   static inline uint32_t builtin_sizeof(BuiltInType type) noexcept
   {
     static constexpr std::array<uint32_t, BUILTIN_COUNT> SIZES = {
@@ -1467,7 +1463,7 @@ extern "C"
     return lookup_found(e.address_or_offset);
   }
 
-  bool rt_register_set_type(
+  bool stdcolt_ext_rt_register_set_type(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id, Type type)
   {
     if (!ctx || !id || !type || type->owner != ctx)
