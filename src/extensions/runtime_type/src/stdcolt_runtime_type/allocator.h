@@ -21,9 +21,9 @@ extern "C"
   typedef struct
   {
     /// @brief The pointer to the block or nullptr
-    void* ptr = nullptr;
+    void* ptr;
     /// @brief The size of the allocation
-    uint64_t size = 0;
+    uint64_t size;
   } stdcolt_ext_rt_Block;
 
   /// @brief Type erased allocator.
