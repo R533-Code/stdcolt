@@ -17,16 +17,16 @@ extern "C"
 #endif // __cplusplus
 
   /// @brief A key passed to perfect hash functions
-  struct stdcolt_ext_rt_Key
+  typedef struct
   {
     /// @brief The key
     const void* key;
     /// @brief The size of the key
     uint64_t size;
-  };
+  } stdcolt_ext_rt_Key;
 
   /// @brief Type erased perfect hash function builder.
-  struct stdcolt_ext_rt_RecipePerfectHashFunction
+  typedef struct
   {
     /// @brief Size of the resulting perfect hash function (may be zero)
     uint32_t phf_sizeof;
@@ -50,10 +50,10 @@ extern "C"
     /// do not exist in the initial set.
     /// @pre May only be called if `phf_construct` returned 0.
     uint64_t (*phf_lookup)(void*, const stdcolt_ext_rt_Key*);
-  };
+  } stdcolt_ext_rt_RecipePerfectHashFunction;
 
   /// @brief Per-VTable PHF data
-  struct stdcolt_ext_rt_PerfectHashFunction
+  typedef struct
   {
     /// @brief Pointer to the type erased perfect hash function
     void* state;
@@ -61,7 +61,7 @@ extern "C"
     uint64_t (*phf_lookup)(void*, const stdcolt_ext_rt_Key*);
     /// @brief Pointer to the type erased destruct hash function
     void (*phf_destruct)(void*);
-  };
+  } stdcolt_ext_rt_PerfectHashFunction;
 
   /// @brief Returns the default perfect hash function recipe.
   /// @return The perfect hash function recipe

@@ -18,16 +18,16 @@ extern "C"
 
   /// @brief Allocated block.
   /// The exact same block obtained on allocation must be passed on deallocation.
-  struct stdcolt_ext_rt_Block
+  typedef struct
   {
     /// @brief The pointer to the block or nullptr
     void* ptr = nullptr;
     /// @brief The size of the allocation
     uint64_t size = 0;
-  };
+  } stdcolt_ext_rt_Block;
 
   /// @brief Type erased allocator.
-  struct stdcolt_ext_rt_RecipeAllocator
+  typedef struct
   {
     /// @brief Size of the resulting allocator state (may be zero)
     uint32_t allocator_sizeof;
@@ -52,10 +52,10 @@ extern "C"
     /// Second argument, the block obtained from `allocator_alloc`.
     /// @pre May only be called if `allocator_construct` returned 0.
     void (*allocator_dealloc)(void*, const stdcolt_ext_rt_Block*);
-  };
+  } stdcolt_ext_rt_RecipeAllocator;
 
   /// @brief Per-VTable allocator data
-  struct Allocator
+  typedef struct
   {
     /// @brief Pointer to the allocator storage
     void* state;
@@ -74,7 +74,7 @@ extern "C"
     /// First argument, the storage passed to `allocator_construct`.
     /// @pre May only be called if `allocator_construct` returned 0.
     void (*allocator_destruct)(void*);
-  };
+  } stdcolt_ext_rt_Allocator;
 
   /// @brief Returns the default allocator used by the library.
   /// The allocator returned supports extended alignment.
