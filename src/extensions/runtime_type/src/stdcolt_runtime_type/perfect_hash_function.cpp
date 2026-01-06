@@ -9,36 +9,36 @@
 #include <string>
 #include <unordered_map>
 
+static std::string_view to_sv(const stdcolt_ext_rt_Key& key) noexcept
+{
+  return {(const char*)key.key, key.size};
+}
+
+struct stdcolt_ext_rt_transparent_hash
+{
+  using is_transparent = void;
+  using hash_type      = std::hash<std::string_view>;
+
+  size_t operator()(std::string_view sv) const noexcept { return hash_type{}(sv); }
+  size_t operator()(const stdcolt_ext_rt_Key& sv) const noexcept
+  {
+    return hash_type{}(to_sv(sv));
+  }
+  size_t operator()(const char* s) const noexcept
+  {
+    return hash_type{}(std::string_view{s});
+  }
+  size_t operator()(const std::string& s) const noexcept
+  {
+    return hash_type{}(std::string_view{s});
+  }
+};
+
+using default_phf = std::unordered_map<
+    std::string, uint64_t, stdcolt_ext_rt_transparent_hash, std::equal_to<>>;
+
 extern "C"
 {
-  static std::string_view to_sv(const stdcolt_ext_rt_Key& key) noexcept
-  {
-    return {(const char*)key.key, key.size};
-  }
-
-  struct stdcolt_ext_rt_transparent_hash
-  {
-    using is_transparent = void;
-    using hash_type      = std::hash<std::string_view>;
-
-    size_t operator()(std::string_view sv) const noexcept { return hash_type{}(sv); }
-    size_t operator()(const stdcolt_ext_rt_Key& sv) const noexcept
-    {
-      return hash_type{}(to_sv(sv));
-    }
-    size_t operator()(const char* s) const noexcept
-    {
-      return hash_type{}(std::string_view{s});
-    }
-    size_t operator()(const std::string& s) const noexcept
-    {
-      return hash_type{}(std::string_view{s});
-    }
-  };
-
-  using default_phf = std::unordered_map<
-      std::string, uint64_t, stdcolt_ext_rt_transparent_hash, std::equal_to<>>;
-
   static int32_t default_phf_construct(
       void* storage, const stdcolt_ext_rt_Key* array_key,
       uint64_t array_size) noexcept
