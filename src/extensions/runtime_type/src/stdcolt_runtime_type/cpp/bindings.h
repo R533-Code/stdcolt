@@ -3,9 +3,28 @@
 
 #include <stdcolt_runtime_type/runtime_type.h>
 #include <stdcolt_runtime_type/cpp/abi_thunk.h>
+#include <string_view>
+#include <memory>
 
 namespace stdcolt::ext::rt
 {
+  /// @brief Runtime type description
+  using Type = stdcolt_ext_rt_Type;
+  /// @brief Opaque type ID
+  using OpaqueTypeID = stdcolt_ext_rt_OpaqueTypeID;
+  /// @brief RuntimeContext
+  using RuntimeContext = stdcolt_ext_rt_RuntimeContext;
+  /// @brief Member description
+  using Member = stdcolt_ext_rt_Member;
+  /// @brief Member info description
+  using MemberInfo = stdcolt_ext_rt_MemberInfo;
+  /// @brief Type erased functions to manage the lifetime of an object
+  using NamedLifetime = stdcolt_ext_rt_NamedLifetime;
+  /// @brief
+  using ResultType = stdcolt_ext_rt_ResultType;
+  /// @brief
+  using ResultLookup = stdcolt_ext_rt_ResultLookup;
+
   /// @brief Contains a global variable that is unique per type per module.
   /// In different modules (such as DLLs), this generates different addresses
   /// for the same types.
@@ -35,7 +54,7 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      return rt_register_get_type(
+      return stdcolt_ext_rt_register_get_type(
           ctx, unique_opaque_type_id_for<std::remove_cv_t<T>>());
     }
   };
@@ -57,9 +76,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_OPAQUE_ADDRESS);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_OPAQUE_ADDRESS);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -69,10 +89,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret =
-              rt_type_create_builtin(ctx, BuiltInType::TYPE_CONST_OPAQUE_ADDRESS);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_CONST_OPAQUE_ADDRESS);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -82,9 +102,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_BOOL);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_BOOL);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -94,9 +115,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_U8);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U8);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -105,9 +127,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_U16);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U16);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -116,9 +139,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_U32);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U32);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -127,9 +151,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_U64);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U64);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -138,9 +163,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_I8);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I8);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -149,9 +175,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_I16);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I16);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -160,9 +187,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_I32);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I32);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -171,9 +199,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_I64);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I64);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -182,9 +211,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_FLOAT);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_FLOAT);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -193,9 +223,10 @@ namespace stdcolt::ext::rt
   {
     static Type get(RuntimeContext* ctx) noexcept
     {
-      if (auto ret = rt_type_create_builtin(ctx, BuiltInType::TYPE_DOUBLE);
-          ret.result == TypeResult::TYPE_SUCCESS)
-        return ret.success.type;
+      if (auto ret = stdcolt_ext_rt_type_create_builtin(
+              ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_DOUBLE);
+          ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return ret.data.success.type;
       return nullptr;
     }
   };
@@ -237,9 +268,9 @@ namespace stdcolt::ext::rt
         return type_of<void*>(ctx);
       else
       {
-        if (auto ret = rt_type_create_ptr(ctx, type_of<T>(ctx), false);
-            ret.result == TypeResult::TYPE_SUCCESS)
-          return ret.success.type;
+        if (auto ret = stdcolt_ext_rt_type_create_ptr(ctx, type_of<T>(ctx), false);
+            ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+          return ret.data.success.type;
         return nullptr;
       }
     }
@@ -253,9 +284,9 @@ namespace stdcolt::ext::rt
         return type_of<const void*>(ctx);
       else
       {
-        if (auto ret = rt_type_create_ptr(ctx, type_of<T>(ctx), true);
-            ret.result == TypeResult::TYPE_SUCCESS)
-          return ret.success.type;
+        if (auto ret = stdcolt_ext_rt_type_create_ptr(ctx, type_of<T>(ctx), true);
+            ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+          return ret.data.success.type;
         return nullptr;
       }
     }
@@ -272,9 +303,9 @@ namespace stdcolt::ext::rt
       if (!elem)
         return nullptr;
 
-      auto r = rt_type_create_array(ctx, elem, (uint64_t)N);
-      if (r.result == TypeResult::TYPE_SUCCESS)
-        return r.success.type;
+      auto r = stdcolt_ext_rt_type_create_array(ctx, elem, (uint64_t)N);
+      if (r.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return r.data.success.type;
       return nullptr;
     }
   };
@@ -302,9 +333,9 @@ namespace stdcolt::ext::rt
   {
     Type ret    = type_of<R>(ctx);
     Type argv[] = {type_of<A>(ctx)...};
-    if (auto _ret = rt_type_create_fn(ctx, ret, {argv, sizeof...(A)});
-        _ret.result == TypeResult::TYPE_SUCCESS)
-      return _ret.success.type;
+    if (auto _ret = stdcolt_ext_rt_type_create_fn(ctx, ret, {argv, sizeof...(A)});
+        _ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+      return _ret.data.success.type;
     return nullptr;
   }
 
@@ -400,8 +431,8 @@ namespace stdcolt::ext::rt
           "offsetof is only supported for standard-layout types");
 
       Member m{};
-      m.name              = {nm.data(), nm.size()};
-      m.description       = {doc.data(), doc.size()};
+      m.name              = {(const char*)nm.data(), nm.size()};
+      m.description       = {(const char*)doc.data(), doc.size()};
       m.address_or_offset = (uintptr_t)Offset;
       m.type              = type_of<FieldT>(ctx);
       return m;
@@ -414,13 +445,13 @@ namespace stdcolt::ext::rt
   };
 
   template<typename T>
-  static void destroy_T(const TypeDesc*, void* p) noexcept
+  static void destroy_T(Type, void* p) noexcept
   {
     std::destroy_at(reinterpret_cast<T*>(p));
   }
 
   template<typename T>
-  static bool copy_T(const TypeDesc*, void* out, const void* src) noexcept
+  static bool copy_T(Type, void* out, const void* src) noexcept
   {
     try
     {
@@ -434,7 +465,7 @@ namespace stdcolt::ext::rt
   }
 
   template<typename T>
-  static void move_T(const TypeDesc*, void* out, void* src) noexcept
+  static void move_T(Type, void* out, void* src) noexcept
   {
     auto* s = reinterpret_cast<T*>(src);
     std::construct_at(reinterpret_cast<T*>(out), std::move(*s));
@@ -496,7 +527,7 @@ namespace stdcolt::ext::rt
   }
 
   template<typename T, MemberDescriptor... Ts>
-  TypeResult bind_type(
+  ResultType bind_type(
       RuntimeContext* ctx, std::u8string_view name, Ts&&... ts) noexcept
   {
     Member members[sizeof...(Ts)]{};
@@ -504,13 +535,15 @@ namespace stdcolt::ext::rt
     ((members[i++] = ts.make_member(ctx)), ...);
     static constexpr NamedLifetime lt = make_lifetime<std::remove_cv_t<T>>();
 
-    auto t = rt_type_create(
-        ctx, {name.data(), name.size()}, {members, sizeof...(Ts)}, alignof(T),
-        sizeof(T), &lt);
-    if (t.result == TypeResult::TYPE_SUCCESS)
+    auto _name    = stdcolt_ext_rt_StringView{(const char*)name.data(), name.size()};
+    auto _members = stdcolt_ext_rt_MemberView{members, sizeof...(Ts)};
+    auto t        = stdcolt_ext_rt_type_create(
+        ctx, &_name, &_members, alignof(T), sizeof(T), &lt, nullptr, nullptr);
+    if (t.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
     {
-      (void)rt_register_set_type(
-          ctx, unique_opaque_type_id_for<std::remove_cv_t<T>>(), t.success.type);
+      (void)stdcolt_ext_rt_register_set_type(
+          ctx, unique_opaque_type_id_for<std::remove_cv_t<T>>(),
+          t.data.success.type);
     }
     return t;
   }
