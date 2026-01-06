@@ -2,7 +2,7 @@
 #define __HG_STDCOLT_EXT_RUNTIME_TYPE_CPP_BINDINGS
 
 #include <stdcolt_runtime_type/runtime_type.h>
-#include <stdcolt_runtime_type/cpp_abi_thunk.h>
+#include <stdcolt_runtime_type/cpp/abi_thunk.h>
 
 namespace stdcolt::ext::rt
 {
