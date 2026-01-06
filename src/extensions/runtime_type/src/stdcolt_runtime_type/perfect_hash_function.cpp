@@ -9,20 +9,23 @@
 #include <string>
 #include <unordered_map>
 
-namespace stdcolt::ext::rt
+extern "C"
 {
-  static std::string_view to_sv(Key key) noexcept
+  static std::string_view to_sv(const stdcolt_ext_rt_Key& key) noexcept
   {
     return {(const char*)key.key, key.size};
   }
 
-  struct transparent_hash
+  struct stdcolt_ext_rt_transparent_hash
   {
     using is_transparent = void;
     using hash_type      = std::hash<std::string_view>;
 
     size_t operator()(std::string_view sv) const noexcept { return hash_type{}(sv); }
-    size_t operator()(Key sv) const noexcept { return hash_type{}(to_sv(sv)); }
+    size_t operator()(const stdcolt_ext_rt_Key& sv) const noexcept
+    {
+      return hash_type{}(to_sv(sv));
+    }
     size_t operator()(const char* s) const noexcept
     {
       return hash_type{}(std::string_view{s});
@@ -33,16 +36,18 @@ namespace stdcolt::ext::rt
     }
   };
 
-  using default_phf =
-      std::unordered_map<std::string, uint64_t, transparent_hash, std::equal_to<>>;
+  using default_phf = std::unordered_map<
+      std::string, uint64_t, stdcolt_ext_rt_transparent_hash, std::equal_to<>>;
 
   static int32_t default_phf_construct(
-      void* storage, const Key* array_key, uint64_t array_size) noexcept
+      void* storage, const stdcolt_ext_rt_Key* array_key,
+      uint64_t array_size) noexcept
   {
     default_phf* ptr = nullptr;
     try
     {
       ptr = new (storage) default_phf();
+      // TODO: check for duplicates...
       for (size_t i = 0; i < array_size; i++)
         ptr->emplace(to_sv(array_key[i]), i);
       return 0;
@@ -67,16 +72,17 @@ namespace stdcolt::ext::rt
     }
   }
 
-  static uint64_t default_phf_lookup(void* storage, Key key) noexcept
+  static uint64_t default_phf_lookup(
+      void* storage, const stdcolt_ext_rt_Key* key) noexcept
   {
     auto ptr = ((default_phf*)storage);
-    auto ret = ptr->find(to_sv(key));
+    auto ret = ptr->find(to_sv(*key));
     if (ret == ptr->end())
       return 0;
     return ret->second;
   }
 
-  RecipePerfectHashFunction default_perfect_hash_function() noexcept
+  stdcolt_ext_rt_RecipePerfectHashFunction stdcolt_ext_rt_default_perfect_hash_function()
   {
     return {
         .phf_sizeof    = sizeof(default_phf),

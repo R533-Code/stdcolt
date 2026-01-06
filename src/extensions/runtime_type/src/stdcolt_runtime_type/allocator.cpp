@@ -5,15 +5,18 @@
  * @date   December 2025
  *********************************************************************/
 #include "./allocator.h"
+#include <stdcolt_allocators/allocator.h>
 #include <stdcolt_allocators/allocators/mallocator.h>
 
-namespace stdcolt::ext::rt
+using namespace stdcolt;
+
+extern "C"
 {
-  RecipeAllocator default_allocator() noexcept
+  stdcolt_ext_rt_RecipeAllocator stdcolt_ext_rt_default_allocator()
   {
     return {
         .allocator_sizeof    = 0,
-        .allocator_alignof = 1,
+        .allocator_alignof   = 1,
         .allocator_construct = +[](void*) noexcept { return 0; },
         .allocator_destruct  = +[](void*) noexcept { /* does nothing */ },
         .allocator_alloc =
@@ -21,12 +24,13 @@ namespace stdcolt::ext::rt
             {
               auto blk =
                   alloc::MallocatorAligned{}.allocate(alloc::Layout{size, align});
-              return Block{blk.ptr(), blk.size()};
+              return stdcolt_ext_rt_Block{blk.ptr(), blk.size()};
             },
         .allocator_dealloc =
-            +[](void*, Block blk) noexcept
+            +[](void*, const stdcolt_ext_rt_Block* blk) noexcept
             {
-              alloc::MallocatorAligned{}.deallocate(alloc::Block{blk.ptr, blk.size});
+              alloc::MallocatorAligned{}.deallocate(
+                  alloc::Block{blk->ptr, blk->size});
             },
     };
   }

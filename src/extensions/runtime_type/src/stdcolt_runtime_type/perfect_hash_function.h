@@ -1,28 +1,32 @@
 /*****************************************************************/ /**
  * @file   perfect_hash_function.h
  * @brief  Contains perfect hash function recipes (for type erasure).
+ * This header is suitable to be consumed by C compilers.
  * @author Raphael Dib Nehme
  * @date   December 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_EXT_RUNTIME_TYPE_PERFECT_HASH_FUNCTION
 #define __HG_STDCOLT_EXT_RUNTIME_TYPE_PERFECT_HASH_FUNCTION
 
-#include <cstdint>
+#include <stdint.h>
 #include <stdcolt_runtime_type_export.h>
 
-namespace stdcolt::ext::rt
+#ifdef __cplusplus
+extern "C"
 {
+#endif // __cplusplus
+
   /// @brief A key passed to perfect hash functions
-  struct Key
+  struct stdcolt_ext_rt_Key
   {
     /// @brief The key
     const void* key;
     /// @brief The size of the key
-    uint32_t size;
+    uint64_t size;
   };
 
   /// @brief Type erased perfect hash function builder.
-  struct RecipePerfectHashFunction
+  struct stdcolt_ext_rt_RecipePerfectHashFunction
   {
     /// @brief Size of the resulting perfect hash function (may be zero)
     uint32_t phf_sizeof;
@@ -33,11 +37,11 @@ namespace stdcolt::ext::rt
     /// Second argument, the array of keys.
     /// Third argument, the size of the array of keys.
     /// Returns 0 on success.
-    int32_t (*phf_construct)(void*, const Key*, uint64_t) noexcept;
+    int32_t (*phf_construct)(void*, const stdcolt_ext_rt_Key*, uint64_t);
     /// @brief Destructs a perfect hash function object.
     /// First argument, the storage passed to `phf_construct`.
     /// @pre May only be called if `phf_construct` returned 0.
-    void (*phf_destruct)(void*) noexcept;
+    void (*phf_destruct)(void*);
     /// @brief Applies the perfect hash function on a key.
     /// First argument, the storage passed to `phf_construct`.
     /// Second argument, the key.
@@ -45,24 +49,27 @@ namespace stdcolt::ext::rt
     /// [0, size of array passed to `phf_construct`), even for keys that
     /// do not exist in the initial set.
     /// @pre May only be called if `phf_construct` returned 0.
-    uint64_t (*phf_lookup)(void*, Key) noexcept;
+    uint64_t (*phf_lookup)(void*, const stdcolt_ext_rt_Key*);
   };
 
   /// @brief Per-VTable PHF data
-  struct PerfectHashFunction
+  struct stdcolt_ext_rt_PerfectHashFunction
   {
     /// @brief Pointer to the type erased perfect hash function
     void* state;
     /// @brief Perfect hash function lookup
-    uint64_t (*phf_lookup)(void*, Key) noexcept;
+    uint64_t (*phf_lookup)(void*, const stdcolt_ext_rt_Key*);
     /// @brief Pointer to the type erased destruct hash function
-    void (*phf_destruct)(void*) noexcept;
+    void (*phf_destruct)(void*);
   };
 
   /// @brief Returns the default perfect hash function recipe.
   /// @return The perfect hash function recipe
   STDCOLT_RUNTIME_TYPE_EXPORT
-  RecipePerfectHashFunction default_perfect_hash_function() noexcept;
-} // namespace stdcolt::ext::rt
+  stdcolt_ext_rt_RecipePerfectHashFunction stdcolt_ext_rt_default_perfect_hash_function();
+
+#ifdef __cplusplus
+}
+#endif // __cplusplus
 
 #endif // !__HG_STDCOLT_EXT_RUNTIME_TYPE_PERFECT_HASH_FUNCTION
