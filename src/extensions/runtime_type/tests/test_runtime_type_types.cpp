@@ -91,6 +91,13 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(ptr->b == 0.2);
     REQUIRE(ptr->c == 3);
     REQUIRE(ptr->d == 4);
+    
+    auto a_ptr = val.lookup<uint8_t>(u8"a");
+    REQUIRE(a_ptr != nullptr);
+    REQUIRE(*a_ptr == 1);
+    *a_ptr = 10;
+    
+    REQUIRE(ptr->a == 10);
   }
 
   stdcolt_ext_rt_destroy(ctx);
