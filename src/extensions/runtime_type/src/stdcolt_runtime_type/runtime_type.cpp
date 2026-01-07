@@ -1400,7 +1400,7 @@ extern "C"
     return std::memcmp(a.data(), b_cstr, (size_t)b_size) == 0;
   }
 
-  ResultLookup rt_type_lookup_fast(
+  ResultLookup stdcolt_ext_rt_type_lookup_fast(
       Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v,
       Type expected_type)
   {
@@ -1430,7 +1430,7 @@ extern "C"
     return lookup_found(e.address_or_offset);
   }
 
-  ResultLookup rt_type_lookup(
+  ResultLookup stdcolt_ext_rt_type_lookup(
       Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v,
       Type expected_type)
   {
