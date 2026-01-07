@@ -11,11 +11,15 @@
 namespace stdcolt::ext::rt
 {
   /// @brief Value that may contain any type.
-  /// This is a wrapper of the C stable API.
+  /// This is a wrapper over the stable C API.
   class Value
   {
     /// @brief Underlying value
     stdcolt_ext_rt_Value _value;
+
+    template<class T, auto LookupFn, class Self>
+    static std::conditional_t<std::is_const_v<Self>, const T*, T*> lookup_impl(
+        Self& self, std::u8string_view member) noexcept;
 
   public:
     /// @brief Constructs an empty value
@@ -52,34 +56,7 @@ namespace stdcolt::ext::rt
     template<typename T, typename... Ts>
     static std::optional<Value> make_in_place(
         RuntimeContext* ctx,
-        Ts&&... args) noexcept(std::is_nothrow_constructible_v<T, Ts...>)
-    {
-      STDCOLT_pre(ctx != nullptr, "Context must not be null!");
-
-      auto type = type_of<T>(ctx);
-      if (type == nullptr)
-        return std::nullopt;
-
-      Value val;
-      if (stdcolt_ext_rt_val_construct(&val._value, type)
-          != STDCOLT_EXT_RT_VALUE_SUCCESS)
-        return std::nullopt;
-
-      if constexpr (std::is_nothrow_constructible_v<T, Ts...>)
-        new (val._value.header.address) T(std::forward<Ts>(args)...);
-      else
-      {
-        try
-        {
-          new (val._value.header.address) T(std::forward<Ts>(args)...);
-        }
-        catch (...)
-        {
-          return std::nullopt;
-        }
-      }
-      return std::move(val);
-    }
+        Ts&&... args) noexcept(std::is_nothrow_constructible_v<T, Ts...>);
 
     /// @brief Check if the value is empty
     /// @return True if the value is empty
@@ -121,28 +98,25 @@ namespace stdcolt::ext::rt
       return is_type<T>() ? (T*)_value.header.address : nullptr;
     }
 
-    template<typename T>
-    const T* lookup_fast(std::u8string_view member) const noexcept
+    template<class T>
+    const T* lookup_fast(std::u8string_view m) const noexcept
     {
-      if (is_empty())
-        return nullptr;
-      auto res = stdcolt_ext_rt_type_lookup_fast(
-          type(), {(const char*)member.data(), member.size()}, type_of<T>());
-      if (res.result == STDCOLT_EXT_RT_LOOKUP_FOUND)
-        return (const T*)((const char*)base_address()
-                          + res.data.found.address_or_offset);
-      return nullptr;
+      return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
     }
-    template<typename T>
-    T* lookup_fast(std::u8string_view member) noexcept
+    template<class T>
+    T* lookup_fast(std::u8string_view m) noexcept
     {
-      if (is_empty())
-        return nullptr;
-      auto res = stdcolt_ext_rt_type_lookup_fast(
-          type(), {(const char*)member.data(), member.size()}, type_of<T>());
-      if (res.result == STDCOLT_EXT_RT_LOOKUP_FOUND)
-        return (T*)((const char*)base_address() + res.data.found.address_or_offset);
-      return nullptr;
+      return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
+    }
+    template<class T>
+    const T* lookup(std::u8string_view m) const noexcept
+    {
+      return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
+    }
+    template<class T>
+    T* lookup(std::u8string_view m) noexcept
+    {
+      return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
     }
 
     /// @brief Destroys the stored object, and mark the value as empty
@@ -161,6 +135,59 @@ namespace stdcolt::ext::rt
       return std::move(val);
     }
   };
+
+  template<typename T, typename... Ts>
+  std::optional<Value> Value::make_in_place(
+      RuntimeContext* ctx,
+      Ts&&... args) noexcept(std::is_nothrow_constructible_v<T, Ts...>)
+  {
+    STDCOLT_pre(ctx != nullptr, "Context must not be null!");
+
+    auto type = type_of<T>(ctx);
+    if (type == nullptr)
+      return std::nullopt;
+
+    Value val;
+    if (stdcolt_ext_rt_val_construct(&val._value, type)
+        != STDCOLT_EXT_RT_VALUE_SUCCESS)
+      return std::nullopt;
+
+    if constexpr (std::is_nothrow_constructible_v<T, Ts...>)
+      new (val._value.header.address) T(std::forward<Ts>(args)...);
+    else
+    {
+      try
+      {
+        new (val._value.header.address) T(std::forward<Ts>(args)...);
+      }
+      catch (...)
+      {
+        return std::nullopt;
+      }
+    }
+    return std::move(val);
+  }
+
+  template<class T, auto LookupFn, class Self>
+  std::conditional_t<std::is_const_v<Self>, const T*, T*> Value::lookup_impl(
+      Self& self, std::u8string_view member) noexcept
+  {
+    if (self.is_empty())
+      return nullptr;
+
+    auto name = stdcolt_ext_rt_StringView{
+        reinterpret_cast<const char*>(member.data()), member.size()};
+
+    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()));
+    if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
+      return nullptr;
+
+    auto base = static_cast<const char*>(self.base_address());
+    auto addr = base + res.data.found.address_or_offset;
+
+    using Ptr = std::conditional_t<std::is_const_v<Self>, const T*, T*>;
+    return reinterpret_cast<Ptr>(const_cast<char*>(addr));
+  }
 } // namespace stdcolt::ext::rt
 
 #endif // !__HG_STDCOLT_EXT_RUNTIME_TYPE_CPP_RUNTIME_TYPE
