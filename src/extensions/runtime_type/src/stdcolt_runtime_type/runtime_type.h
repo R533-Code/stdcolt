@@ -593,7 +593,7 @@ extern "C"
   /// @brief Advances the iterator.
   /// This function advances the iterators, and returns null
   /// to mark end of iteration.
-  /// @param iter The iterator to advance (not null!)
+  /// @param iter The iterator to advance (or null)
   /// @return The updated iterator
   STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_advance(
@@ -605,7 +605,7 @@ extern "C"
   /// @param iter The iterator or null
   STDCOLT_RUNTIME_TYPE_EXPORT
   void stdcolt_ext_rt_reflect_destroy(stdcolt_ext_rt_ReflectIterator* iter);
-
+  
   /*****************************/
   // BUILTIN TYPES
   /*****************************/
