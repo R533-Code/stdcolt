@@ -564,6 +564,49 @@ extern "C"
       stdcolt_ext_rt_Type expected_type);
 
   /*****************************/
+  // REFLECTION
+  /*****************************/
+
+  /// @brief Opaque iterator handle
+  struct stdcolt_ext_rt_ReflectIterator;
+  typedef struct stdcolt_ext_rt_ReflectIterator stdcolt_ext_rt_ReflectIterator;
+
+  /// @brief Creates an iterator to reflect on a type.
+  /// If the returned iterator is not null, then it must be advanced
+  /// before being read.
+  /// @param type The type to reflect against
+  /// @return null or a valid iterator to pass to `reflect_advance` and `reflect_read`
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_create(
+      stdcolt_ext_rt_Type type);
+
+  /// @brief Reads from an iterator.
+  /// The iterator must be advanced before reading.
+  /// The returned member info's data is owned by the context/type,
+  /// do not free any of the views!
+  /// @param iter The iterator (not null!)
+  /// @return The member info
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  stdcolt_ext_rt_Member stdcolt_ext_rt_reflect_read(
+      stdcolt_ext_rt_ReflectIterator* iter);
+
+  /// @brief Advances the iterator.
+  /// This function advances the iterators, and returns null
+  /// to mark end of iteration.
+  /// @param iter The iterator to advance (not null!)
+  /// @return The updated iterator
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_advance(
+      stdcolt_ext_rt_ReflectIterator* iter);
+
+  /// @brief Destroys an iterator.
+  /// This function is only needed if iteration is stopped before
+  /// `reflect_advance` returns null. This is a no-op if iter is null.
+  /// @param iter The iterator or null
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  void stdcolt_ext_rt_reflect_destroy(stdcolt_ext_rt_ReflectIterator* iter);
+
+  /*****************************/
   // BUILTIN TYPES
   /*****************************/
 

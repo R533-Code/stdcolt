@@ -106,7 +106,6 @@ static inline uint64_t load_tail_u64(const uint8_t* p, size_t len) noexcept
 
 static inline uint64_t hash_name(std::span<const char8_t> s) noexcept
 {
-  // TODO: check me
   const size_t len = s.size();
   auto p           = (const uint8_t*)s.data();
 
@@ -815,7 +814,7 @@ extern "C"
 
     cursor                    = align_up_dyn(cursor, alignof(NamedTypeVTableEntry));
     const auto entries_offset = (uint32_t)cursor;
-    cursor += sizeof(NamedTypeVTableEntry) * n;
+    cursor += sizeof(NamedTypeVTableEntry) * (n + 1); // + 1 for NULL entry
 
     size_t alloc_state_off = 0;
     if (has_alloc_override)
@@ -984,6 +983,11 @@ extern "C"
       entries[i].true_description  = d;
       entries[i].tag = hash_name({(const char8_t*)m.name.data, m.name.size});
     }
+    // set last entry to sentinel null value
+    entries[n].type              = nullptr;
+    entries[n].tag               = 0;
+    entries[n].address_or_offset = 0;
+    entries[n].true_description  = nullptr;
 
     // insert into name table
     try
@@ -1542,6 +1546,50 @@ extern "C"
     if (e.tag != pm.tag2)
       return lookup_not_found();
     return lookup_found(e.address_or_offset);
+  }
+
+  stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_create(
+      stdcolt_ext_rt_Type type)
+  {
+    if (type == nullptr || type->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
+      return nullptr;
+    const auto init_entry = type->info.kind_named.vtable->entries().data();
+    // - 1 so that the first advance works correctly
+    return (stdcolt_ext_rt_ReflectIterator*)(init_entry - 1);
+  }
+
+  stdcolt_ext_rt_Member stdcolt_ext_rt_reflect_read(
+      stdcolt_ext_rt_ReflectIterator* iter)
+  {
+    STDCOLT_pre(iter != nullptr, "iter must not be null!");
+    auto entry = (const NamedTypeVTableEntry*)iter;
+    stdcolt_ext_rt_Member ret;
+    auto desc = entry->true_description->description();
+    auto name = entry->true_description->key();
+
+    ret.name              = {(const char*)name.data(), name.size()};
+    ret.description       = {(const char*)desc.data(), desc.size()};
+    ret.type              = entry->type;
+    ret.address_or_offset = entry->address_or_offset;
+    return ret;
+  }
+
+  stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_advance(
+      stdcolt_ext_rt_ReflectIterator* iter)
+  {
+    if (iter == nullptr)
+      return nullptr;
+    // advance iterator
+    auto entry = (const NamedTypeVTableEntry*)iter + 1;
+    // if iterator now at sentinel value
+    if (entry->type == nullptr && entry->true_description == nullptr)
+      return nullptr;
+    return (stdcolt_ext_rt_ReflectIterator*)entry;
+  }
+
+  void stdcolt_ext_rt_reflect_destroy(stdcolt_ext_rt_ReflectIterator* iter)
+  {
+    // no-op as iterator is simply a pointer into the array of entries.
   }
 
   static inline Allocator ctx_allocator(stdcolt_ext_rt_RuntimeContext* ctx) noexcept
