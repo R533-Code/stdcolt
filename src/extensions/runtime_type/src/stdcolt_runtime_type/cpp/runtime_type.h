@@ -4,12 +4,21 @@
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <span>
 #include <stdcolt_contracts/contracts.h>
 #include <stdcolt_runtime_type/runtime_type.h>
 #include <stdcolt_runtime_type/cpp/bindings.h>
 
 namespace stdcolt::ext::rt
 {
+  struct ReflectedMember
+  {
+    std::span<const char8_t> name;
+    std::span<const char8_t> description;
+    Type type;
+    uintptr_t address_or_offset;
+  };
+
   /// @brief Value that may contain any type.
   /// This is a wrapper over the stable C API.
   class Value
@@ -77,6 +86,10 @@ namespace stdcolt::ext::rt
     /// @return Base address or nullptr
     const void* base_address() const noexcept { return _value.header.address; }
 
+    /***************************/
+    // DIRECT-TYPE ACCESS
+    /***************************/
+
     /// @brief Check if the value contains a specific type
     /// @tparam T The type to check for
     /// @return True if the value contains an object of that type
@@ -98,26 +111,50 @@ namespace stdcolt::ext::rt
       return is_type<T>() ? (T*)_value.header.address : nullptr;
     }
 
+    /***************************/
+    // MEMBER LOOKUPS
+    /***************************/
+
+    /// @brief Lookup a member
+    /// @tparam T The type of the member
+    /// @param m The name of the member
+    /// @return Pointer to the member
     template<class T>
     const T* lookup_fast(std::u8string_view m) const noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
     }
+    /// @brief Lookup a member
+    /// @tparam T The type of the member
+    /// @param m The name of the member
+    /// @return Pointer to the member
     template<class T>
     T* lookup_fast(std::u8string_view m) noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
     }
+    /// @brief Lookup a member
+    /// @tparam T The type of the member
+    /// @param m The name of the member
+    /// @return Pointer to the member
     template<class T>
     const T* lookup(std::u8string_view m) const noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
     }
+    /// @brief Lookup a member
+    /// @tparam T The type of the member
+    /// @param m The name of the member
+    /// @return Pointer to the member
     template<class T>
     T* lookup(std::u8string_view m) noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
     }
+
+    /***************************/
+    // LIFETIME
+    /***************************/
 
     /// @brief Destroys the stored object, and mark the value as empty
     void reset() noexcept { stdcolt_ext_rt_val_destroy(&_value); }
@@ -133,6 +170,89 @@ namespace stdcolt::ext::rt
           != STDCOLT_EXT_RT_VALUE_SUCCESS)
         return std::nullopt;
       return std::move(val);
+    }
+
+    /***************************/
+    // REFLECTION API
+    /***************************/
+
+    /// @brief Iterator over the reflected members of a type
+    class reflection_iter
+    {
+      stdcolt_ext_rt_ReflectIterator* _iter = nullptr;
+
+    public:
+      /// @brief Constructs an end `reflection_iter`
+      reflection_iter() noexcept = default;
+      /// @brief Constructs a begin `reflection_iter` from a typ
+      /// @param type The type or null
+      reflection_iter(Type type) noexcept
+          : _iter(stdcolt_ext_rt_reflect_create(type))
+      {
+        // advances the iterator so that the first read is valid
+        _iter = stdcolt_ext_rt_reflect_advance(_iter);
+      }
+      /// @brief Destructor
+      ~reflection_iter() noexcept
+      {
+        if (_iter)
+          stdcolt_ext_rt_reflect_destroy(_iter);
+      }
+      reflection_iter(reflection_iter&&) noexcept            = default;
+      reflection_iter& operator=(reflection_iter&&) noexcept = default;
+      reflection_iter(const reflection_iter&)                = delete;
+      reflection_iter& operator=(const reflection_iter&)     = delete;
+
+      /// @brief Advances the iterator
+      /// @return Self
+      reflection_iter& operator++() noexcept
+      {
+        _iter = stdcolt_ext_rt_reflect_advance(_iter);
+        return *this;
+      }
+
+      /// @brief Returns the reflected member
+      /// @return ReflectedMember
+      ReflectedMember operator*() const noexcept
+      {
+        STDCOLT_pre(_iter != nullptr, "dereferencing invalid iterator!");
+        auto member = stdcolt_ext_rt_reflect_read(_iter);
+        return {
+            {(const char8_t*)member.name.data, member.name.size},
+            {(const char8_t*)member.description.data, member.description.size},
+            member.type,
+            member.address_or_offset};
+      }
+
+      bool operator==(const reflection_iter&) const noexcept = default;
+      bool operator!=(const reflection_iter&) const noexcept = default;
+    };
+
+    /// @brief Returns an iterator over the reflected members of the type of the Value.
+    /// @return Begin iterator over the reflected members of the current type
+    reflection_iter reflect_begin() const noexcept
+    {
+      return reflection_iter(type());
+    }
+    /// @brief Returns an iterator over the reflected members of the type of the Value.
+    /// @return End iterator over the reflected members of the current type
+    reflection_iter reflect_end() const noexcept { return reflection_iter(); }
+    /// @brief Returns an object with `begin` and `end` methods to reflect
+    /// on the members of a type.
+    /// @return Object with `begin` and `end` for reflection
+    auto reflect() const noexcept
+    {
+      struct reflector
+      {
+        Type reflected_type;
+
+        reflection_iter begin() const noexcept
+        {
+          return reflection_iter(reflected_type);
+        }
+        reflection_iter end() const noexcept { return reflection_iter(); }
+      };
+      return reflector{type()};
     }
   };
 
