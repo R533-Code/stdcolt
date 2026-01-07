@@ -69,10 +69,10 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
   {
     auto _CxxBindingBasicPOD = bind_type<CxxBindingBasicPOD>(
         ctx, u8"CxxBindingBasicPOD",
-        STDCOLT_RT_FIELD(CxxBindingBasicPOD, a, u8"a", u8""),
-        STDCOLT_RT_FIELD(CxxBindingBasicPOD, b, u8"b", u8""),
-        STDCOLT_RT_FIELD(CxxBindingBasicPOD, c, u8"c", u8""),
-        STDCOLT_RT_FIELD(CxxBindingBasicPOD, d, u8"d", u8""));
+        STDCOLT_RT_FIELD(CxxBindingBasicPOD, a, u8"a", u8"Hello member a!"),
+        STDCOLT_RT_FIELD(CxxBindingBasicPOD, b, u8"b", u8"Hello member b!"),
+        STDCOLT_RT_FIELD(CxxBindingBasicPOD, c, u8"c", u8"Hello member c!"),
+        STDCOLT_RT_FIELD(CxxBindingBasicPOD, d, u8"d", u8"Hello member d!"));
 
     REQUIRE(_CxxBindingBasicPOD.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
     auto type = type_of<CxxBindingBasicPOD>(ctx);
@@ -91,13 +91,19 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(ptr->b == 0.2);
     REQUIRE(ptr->c == 3);
     REQUIRE(ptr->d == 4);
-    
+
     auto a_ptr = val.lookup<uint8_t>(u8"a");
     REQUIRE(a_ptr != nullptr);
     REQUIRE(*a_ptr == 1);
     *a_ptr = 10;
-    
+
     REQUIRE(ptr->a == 10);
+
+    for (auto [name, desc, type, _] : val.reflect())
+    {
+      REQUIRE(name.size() == 1);
+      REQUIRE(type->kind == STDCOLT_EXT_RT_TYPE_KIND_BUILTIN);
+    }
   }
 
   stdcolt_ext_rt_destroy(ctx);
