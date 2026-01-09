@@ -25,6 +25,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(val.type() == nullptr);
     REQUIRE(val.is_type<int>() == false);
     REQUIRE(val.as_type<int>() == nullptr);
+    REQUIRE(val.reflect_name() == u8"");
 
     auto cpy_res = val.copy();
     REQUIRE(cpy_res.has_value());
@@ -42,6 +43,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(val.is_empty() == false);
     REQUIRE(val.context() == ctx);
     REQUIRE(val.type() == type_of<uint32_t>(ctx));
+    REQUIRE(val.reflect_name() == u8"");
 
     auto int_val1 = val.as_type<int32_t>();
     REQUIRE(int_val1 == nullptr);
