@@ -26,7 +26,7 @@ namespace stdcolt::ext::rt
     /// @brief Underlying value
     stdcolt_ext_rt_Value _value;
 
-    template<class T, auto LookupFn, class Self>
+    template<typename T, auto LookupFn, class Self>
     static std::conditional_t<std::is_const_v<Self>, const T*, T*> lookup_impl(
         Self& self, std::u8string_view member) noexcept;
 
@@ -119,7 +119,7 @@ namespace stdcolt::ext::rt
     /// @tparam T The type of the member
     /// @param m The name of the member
     /// @return Pointer to the member
-    template<class T>
+    template<typename T>
     const T* lookup_fast(std::u8string_view m) const noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
@@ -128,7 +128,7 @@ namespace stdcolt::ext::rt
     /// @tparam T The type of the member
     /// @param m The name of the member
     /// @return Pointer to the member
-    template<class T>
+    template<typename T>
     T* lookup_fast(std::u8string_view m) noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
@@ -137,7 +137,7 @@ namespace stdcolt::ext::rt
     /// @tparam T The type of the member
     /// @param m The name of the member
     /// @return Pointer to the member
-    template<class T>
+    template<typename T>
     const T* lookup(std::u8string_view m) const noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
@@ -146,7 +146,7 @@ namespace stdcolt::ext::rt
     /// @tparam T The type of the member
     /// @param m The name of the member
     /// @return Pointer to the member
-    template<class T>
+    template<typename T>
     T* lookup(std::u8string_view m) noexcept
     {
       return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
@@ -298,7 +298,7 @@ namespace stdcolt::ext::rt
     return std::move(val);
   }
 
-  template<class T, auto LookupFn, class Self>
+  template<typename T, auto LookupFn, class Self>
   std::conditional_t<std::is_const_v<Self>, const T*, T*> Value::lookup_impl(
       Self& self, std::u8string_view member) noexcept
   {
