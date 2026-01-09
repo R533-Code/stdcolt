@@ -611,7 +611,7 @@ extern "C"
   /// @param iter The iterator or null
   STDCOLT_RUNTIME_TYPE_EXPORT
   void stdcolt_ext_rt_reflect_destroy(stdcolt_ext_rt_ReflectIterator* iter);
-  
+
   /*****************************/
   // BUILTIN TYPES
   /*****************************/
@@ -755,7 +755,6 @@ extern "C"
     uint8_t inline_buffer[STDCOLT_EXT_RT_VALUE_SBO_SIZE];
   } stdcolt_ext_rt_Value;
 
-  /// @brief The result of fallible operations on `Value`
   enum
   {
     /// @brief Success
@@ -769,6 +768,7 @@ extern "C"
 
     STDCOLT_EXT_RT_VALUE_end
   };
+  /// @brief The result of fallible operations on `Value`
   typedef uint8_t stdcolt_ext_rt_ResultValueKind;
 
   /// @brief Initialize the storage of a `Value` for a specific type.
