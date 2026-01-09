@@ -254,6 +254,16 @@ namespace stdcolt::ext::rt
       };
       return reflector{type()};
     }
+    /// @brief Returns the name of type if it is named
+    /// @return Name of the type for named type or an empty string view
+    std::u8string_view reflect_name() const noexcept
+    {
+      auto _type = type();
+      if (_type == nullptr || _type->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
+        return {};
+      auto ret = stdcolt_ext_rt_reflect_name(_type);
+      return {(const char8_t*)ret.data, ret.size};
+    }
   };
 
   template<typename T, typename... Ts>
