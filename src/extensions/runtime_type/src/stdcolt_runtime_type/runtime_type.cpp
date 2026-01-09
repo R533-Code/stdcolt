@@ -4,7 +4,6 @@
 #include <span>
 #include <cstring>
 #include <new>
-#include <string>
 #include <array>
 #include <string_view>
 #include <unordered_map>
@@ -71,11 +70,6 @@ static inline bool alloc_recipe_valid(
   return r.allocator_alignof >= 1 && is_pow2(r.allocator_alignof)
          && r.allocator_construct != nullptr && r.allocator_destruct != nullptr
          && r.allocator_alloc != nullptr && r.allocator_dealloc != nullptr;
-}
-
-static inline std::u8string to_u8string(std::span<const char8_t> s)
-{
-  return std::u8string(s.data(), s.size());
 }
 
 // SplitMix64
@@ -157,10 +151,6 @@ struct transparent_u8_hash
   {
     return hash_type{}(std::u8string_view{s});
   }
-  size_t operator()(const std::u8string& s) const noexcept
-  {
-    return hash_type{}(std::u8string_view{s});
-  }
 };
 
 struct RTMemberDescription
@@ -201,13 +191,23 @@ struct stdcolt_ext_rt_NamedTypeVTable
 
   uint64_t count_members;
   uint32_t entries_offset;
-  uint32_t _padding;
+  uint32_t name_offset;
+  uint64_t name_size;
 
   std::span<const NamedTypeVTableEntry> entries() const noexcept
   {
     return {
         (const NamedTypeVTableEntry*)((const uint8_t*)this + entries_offset),
         count_members};
+  }
+
+  std::span<const char> name() const noexcept
+  {
+    return {(const char*)this + name_offset, name_size};
+  }
+  std::u8string_view name_sv() const noexcept
+  {
+    return {(const char8_t*)this + name_offset, name_size};
   }
 };
 
@@ -217,8 +217,9 @@ struct stdcolt_ext_rt_RuntimeContext
   alloc::Block default_alloc_state = {};
   RecipePerfectHashFunction default_phf_recipe{};
 
-  std::unordered_map<std::u8string, TypeDesc*, transparent_u8_hash, std::equal_to<>>
-      types_table;
+  // the span points to memory inside the TypeDesc, no need for an
+  // owning string.
+  std::unordered_map<std::u8string_view, TypeDesc*> types_table;
   std::unordered_map<OpaqueTypeID, Type> registered_type_table;
   TypeDesc builtin_types[BUILTIN_COUNT]{};
 
@@ -776,6 +777,8 @@ extern "C"
       return result_type_invalid_param();
     if (align == 0 || !is_pow2(align))
       return result_type_invalid_align();
+    if (name.size() == 0)
+      return result_type_invalid_param();
 
     for (size_t i = 0; i < members.size(); ++i)
     {
@@ -839,6 +842,8 @@ extern "C"
       cursor += m.name.size + 1;
       cursor += m.description.size + 1;
     }
+    const size_t name_offset = cursor;
+    cursor += name.size() + 1; // +1 for NUL terminator
 
     const size_t vtable_blob_size = cursor;
     const size_t total_size       = vtable_off + vtable_blob_size;
@@ -888,7 +893,8 @@ extern "C"
     vt->allocation_size = total_size;
     vt->count_members   = n;
     vt->entries_offset  = entries_offset;
-    vt->_padding        = 0;
+    vt->name_size       = name.size();
+    vt->name_offset     = name_offset;
 
     // allocator state used for instances of this type
     void* type_alloc_state = has_alloc_override ? (void*)(vtbase + alloc_state_off)
@@ -969,21 +975,24 @@ extern "C"
         std::memcpy(vtbase + desc_cursor, m.name.data, (size_t)key_sz);
         desc_cursor += (size_t)key_sz;
       }
-      vtbase[desc_cursor++] = 0;
+      vtbase[desc_cursor++] = 0; // NUL
 
       if (desc_sz != 0)
       {
         std::memcpy(vtbase + desc_cursor, m.description.data, (size_t)desc_sz);
         desc_cursor += (size_t)desc_sz;
       }
-      vtbase[desc_cursor++] = 0;
+      vtbase[desc_cursor++] = 0; // NUL
 
       entries[i].address_or_offset = m.address_or_offset;
       entries[i].type              = m.type;
       entries[i].true_description  = d;
       entries[i].tag = hash_name({(const char8_t*)m.name.data, m.name.size});
     }
-    // set last entry to sentinel null value
+    std::memcpy(vtbase + desc_cursor, name.data(), name.size());
+    vtbase[desc_cursor + name.size()] = 0; // NUL
+
+    // set last entry to sentinel null value (for iterators)
     entries[n].type              = nullptr;
     entries[n].tag               = 0;
     entries[n].address_or_offset = 0;
@@ -992,7 +1001,7 @@ extern "C"
     // insert into name table
     try
     {
-      ctx->types_table.try_emplace(to_u8string(name), td);
+      ctx->types_table.try_emplace(td->info.kind_named.vtable->name_sv(), td);
     }
     catch (...)
     {
@@ -1546,6 +1555,14 @@ extern "C"
     if (e.tag != pm.tag2)
       return lookup_not_found();
     return lookup_found(e.address_or_offset);
+  }
+
+  stdcolt_ext_rt_StringView stdcolt_ext_rt_reflect_name(stdcolt_ext_rt_Type type)
+  {
+    if (type->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
+      return {nullptr, 0};
+    auto name = type->info.kind_named.vtable->name();
+    return {name.data(), name.size()};
   }
 
   stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_create(

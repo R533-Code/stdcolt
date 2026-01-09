@@ -567,6 +567,12 @@ extern "C"
   // REFLECTION
   /*****************************/
 
+  /// @brief Returns the name of a named type.
+  /// @param type The named type
+  /// @return Empty string view or view over the name of the type
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  stdcolt_ext_rt_StringView stdcolt_ext_rt_reflect_name(stdcolt_ext_rt_Type type);
+
   /// @brief Opaque iterator handle
   struct stdcolt_ext_rt_ReflectIterator;
   typedef struct stdcolt_ext_rt_ReflectIterator stdcolt_ext_rt_ReflectIterator;
