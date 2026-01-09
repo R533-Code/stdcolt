@@ -86,6 +86,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     auto& val = *val_res;
 
     auto ptr = val.as_type<CxxBindingBasicPOD>();
+    REQUIRE(val.reflect_name() == u8"CxxBindingBasicPOD");
     REQUIRE(ptr != nullptr);
     REQUIRE(ptr->a == 1);
     REQUIRE(ptr->b == 0.2);
