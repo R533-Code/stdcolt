@@ -1,3 +1,11 @@
+/*****************************************************************/ /**
+ * @file   runtime_type.h
+ * @brief  Contains `Value`, a C++ wrapper over `stdcolt_ext_rt_Value`.
+ * This class provides an easier, modern API, and supports type lookups
+ * using templates.
+ * @author Raphael Dib Nehme
+ * @date   January 2026
+ *********************************************************************/
 #ifndef __HG_STDCOLT_EXT_RUNTIME_TYPE_CPP_RUNTIME_TYPE
 #define __HG_STDCOLT_EXT_RUNTIME_TYPE_CPP_RUNTIME_TYPE
 
@@ -9,13 +17,19 @@
 #include <stdcolt_runtime_type/runtime_type.h>
 #include <stdcolt_runtime_type/cpp/bindings.h>
 
+/// @brief C++ wrappers and utilities over the `stdcolt_ext_rt` C API
 namespace stdcolt::ext::rt
 {
+  /// @brief Reflect member information
   struct ReflectedMember
   {
+    /// @brief The name of the member
     std::span<const char8_t> name;
+    /// @brief The description of the member
     std::span<const char8_t> description;
+    /// @brief The type of the member
     Type type;
+    /// @brief The address or offset of the member
     uintptr_t address_or_offset;
   };
 
@@ -26,6 +40,13 @@ namespace stdcolt::ext::rt
     /// @brief Underlying value
     stdcolt_ext_rt_Value _value;
 
+    /// @brief Lookup a member using a function from the C API
+    /// @tparam T The type of the member to lookup
+    /// @tparam Self Value or const Value
+    /// @tparam LookupFn `stdcolt_ext_rt_lookup_*`
+    /// @param self This
+    /// @param member The member name to lookup
+    /// @return Pointer with correct const-ness, null on lookup failure
     template<typename T, auto LookupFn, class Self>
     static std::conditional_t<std::is_const_v<Self>, const T*, T*> lookup_impl(
         Self& self, std::u8string_view member) noexcept;
@@ -99,12 +120,17 @@ namespace stdcolt::ext::rt
       auto ctx = context();
       return ctx == nullptr ? false : type_of<T>(ctx) == type();
     }
-
+    /// @brief Cast the value to a pointer of a specific type.
+    /// @tparam T The type to cast the value to
+    /// @return nullptr if the type does not match, or valid pointer to T
     template<typename T>
     const T* as_type() const noexcept
     {
       return is_type<T>() ? (const T*)_value.header.address : nullptr;
     }
+    /// @brief Cast the value to a pointer of a specific type.
+    /// @tparam T The type to cast the value to
+    /// @return nullptr if the type does not match, or valid pointer to T
     template<typename T>
     T* as_type() noexcept
     {
