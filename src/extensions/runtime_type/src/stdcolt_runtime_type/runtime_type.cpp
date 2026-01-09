@@ -137,22 +137,6 @@ static inline uint64_t hash_name(std::span<const char8_t> s) noexcept
   return mix64(h);
 }
 
-struct transparent_u8_hash
-{
-  using is_transparent = void;
-  using hash_type      = std::hash<std::u8string_view>;
-
-  size_t operator()(std::u8string_view sv) const noexcept { return hash_type{}(sv); }
-  size_t operator()(std::span<const char8_t> sv) const noexcept
-  {
-    return hash_type{}(std::u8string_view{sv.data(), sv.size()});
-  }
-  size_t operator()(const char8_t* s) const noexcept
-  {
-    return hash_type{}(std::u8string_view{s});
-  }
-};
-
 struct RTMemberDescription
 {
   uint32_t key_size;
