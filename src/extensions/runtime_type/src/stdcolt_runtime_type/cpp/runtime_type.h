@@ -85,8 +85,7 @@ namespace stdcolt::ext::rt
     /// @return A value or nullopt on errors
     template<typename T, typename... Ts>
     static std::optional<Value> make_in_place(
-        RuntimeContext* ctx,
-        Ts&&... args) noexcept(std::is_nothrow_constructible_v<T, Ts...>);
+        RuntimeContext* ctx, Ts&&... args) noexcept;
 
     /// @brief Check if the value is empty
     /// @return True if the value is empty
@@ -95,7 +94,7 @@ namespace stdcolt::ext::rt
     /// @return The type or nullptr for empty values
     Type type() const noexcept { return _value.header.type; }
     /// @brief Returns the context of the Value, or nullptr for empty values
-    /// @return The context of nullptr for empty values
+    /// @return The context or nullptr for empty values
     RuntimeContext* context() const noexcept
     {
       return is_empty() ? nullptr : type()->owner;
@@ -126,15 +125,59 @@ namespace stdcolt::ext::rt
     template<typename T>
     const T* as_type() const noexcept
     {
-      return is_type<T>() ? (const T*)_value.header.address : nullptr;
+      if constexpr (std::is_array_v<T>)
+        return is_type<T>() ? (const std::decay_t<T>)_value.header.address : nullptr;
+      else
+        return is_type<T>() ? (const T*)_value.header.address : nullptr;
     }
     /// @brief Cast the value to a pointer of a specific type.
     /// @tparam T The type to cast the value to
     /// @return nullptr if the type does not match, or valid pointer to T
     template<typename T>
-    T* as_type() noexcept
+    auto as_type() noexcept
     {
-      return is_type<T>() ? (T*)_value.header.address : nullptr;
+      if constexpr (std::is_array_v<T>)
+        return is_type<T>() ? (std::decay_t<T>)_value.header.address : nullptr;
+      else
+        return is_type<T>() ? (T*)_value.header.address : nullptr;
+    }
+
+    /// @brief Converts the value to a span.
+    /// For correct types:
+    /// if the value contains an array, a span of the array
+    /// size is returned; if the value contains a single
+    /// value, a span of size one is returned.
+    /// @tparam T The type or array type expected
+    /// @return Empty span on invalid type, else span of either 1 or array size
+    template<typename T>
+    std::span<const T> as_span() const noexcept
+    {
+      auto t = type();
+      if (t == nullptr)
+        return {};
+      if (t->kind == STDCOLT_EXT_RT_TYPE_KIND_ARRAY)
+      {
+        if (t->info.kind_array.array_type == type_of<T>(t->owner))
+          return {(T*)base_address(), t->info.kind_array.size};
+        return {};
+      }
+      if (t == type_of<T>(t->owner))
+        return {(const T*)base_address(), 1};
+      return {};
+    }
+
+    /// @brief Converts the value to a span.
+    /// For correct types:
+    /// if the value contains an array, a span of the array
+    /// size is returned; if the value contains a single
+    /// value, a span of size one is returned.
+    /// @tparam T The type or array type expected
+    /// @return Empty span on invalid type, else span of either 1 or array size
+    template<typename T>
+    std::span<T> as_span() noexcept
+    {
+      auto ret = ((const Value&)(*this)).as_span<T>();
+      return {(T*)ret.data(), ret.size()};
     }
 
     /***************************/
@@ -294,13 +337,12 @@ namespace stdcolt::ext::rt
 
   template<typename T, typename... Ts>
   std::optional<Value> Value::make_in_place(
-      RuntimeContext* ctx,
-      Ts&&... args) noexcept(std::is_nothrow_constructible_v<T, Ts...>)
+      RuntimeContext* ctx, Ts&&... args) noexcept
   {
     STDCOLT_pre(ctx != nullptr, "Context must not be null!");
 
     auto type = type_of<T>(ctx);
-    if (type == nullptr)
+    if (!type)
       return std::nullopt;
 
     Value val;
@@ -308,20 +350,67 @@ namespace stdcolt::ext::rt
         != STDCOLT_EXT_RT_VALUE_SUCCESS)
       return std::nullopt;
 
-    if constexpr (std::is_nothrow_constructible_v<T, Ts...>)
-      new (val._value.header.address) T(std::forward<Ts>(args)...);
-    else
+    void* const storage = val._value.header.address;
+
+    if constexpr (!std::is_array_v<T>)
     {
-      try
+      if constexpr (std::is_nothrow_constructible_v<T, Ts...>)
       {
-        new (val._value.header.address) T(std::forward<Ts>(args)...);
+        std::construct_at(static_cast<T*>(storage), std::forward<Ts>(args)...);
+        return val;
       }
-      catch (...)
+      else
       {
-        return std::nullopt;
+        try
+        {
+          std::construct_at(static_cast<T*>(storage), std::forward<Ts>(args)...);
+          return val;
+        }
+        catch (...)
+        {
+          stdcolt_ext_rt_val_destroy(&val._value);
+          return std::nullopt;
+        }
       }
     }
-    return std::move(val);
+    else
+    {
+      static_assert(
+          std::extent_v<T> != 0, "Unsupported: array of unknown bound T = U[]");
+
+      using U            = std::remove_extent_t<T>;
+      constexpr size_t N = std::extent_v<T>;
+
+      static_assert(
+          sizeof...(Ts) == N,
+          "For U[N], make_in_place expects exactly N arguments (one per element).");
+
+      U* const arr = static_cast<U*>(storage);
+
+      if constexpr ((std::is_nothrow_constructible_v<U, Ts&&> && ...))
+      {
+        size_t i = 0;
+        ((std::construct_at(arr + i++, std::forward<Ts>(args))), ...);
+        return val;
+      }
+      else
+      {
+        size_t i = 0;
+        try
+        {
+          ((std::construct_at(arr + i++, std::forward<Ts>(args))), ...);
+          return val;
+        }
+        catch (...)
+        {
+          for (size_t j = 0; j < i; ++j)
+            std::destroy_at(arr + j);
+
+          stdcolt_ext_rt_val_destroy(&val._value);
+          return std::nullopt;
+        }
+      }
+    }
   }
 
   template<typename T, auto LookupFn, class Self>
