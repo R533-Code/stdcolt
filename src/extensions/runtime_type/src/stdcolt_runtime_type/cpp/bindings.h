@@ -207,6 +207,17 @@ namespace stdcolt::ext::rt
     }
   };
   template<>
+  struct type_tag<char>
+  {
+    static Type get(RuntimeContext* ctx) noexcept
+    {
+      if constexpr (std::is_signed_v<char>)
+        return type_of<int8_t>(ctx);
+      else
+        return type_of<uint8_t>(ctx);
+    }
+  };
+  template<>
   struct type_tag<float>
   {
     static Type get(RuntimeContext* ctx) noexcept
