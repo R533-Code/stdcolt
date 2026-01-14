@@ -67,6 +67,36 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(int_val3 != int_val2);
     REQUIRE(*int_val2 == *int_val3);
   }
+  SUBCASE("basic array built-in")
+  {
+    static constexpr char STR[] = "hello";
+    auto val_res1 =
+        Value::make_in_place<char[sizeof(STR)]>(ctx, 'h', 'e', 'l', 'l', 'o', '\0');
+    REQUIRE(val_res1.has_value());
+    auto& val = *val_res1;
+    REQUIRE(val.is_empty() == false);
+    REQUIRE(val.context() == ctx);
+    REQUIRE(val.type() == type_of<char[sizeof(STR)]>(ctx));
+    REQUIRE(val.reflect_name() == u8"");
+
+    auto int_val1 = val.as_type<int32_t>();
+    REQUIRE(int_val1 == nullptr);
+
+    auto int_val2 = val.as_type<char[sizeof(STR)]>();
+    REQUIRE(int_val2 != nullptr);
+    REQUIRE(doctest::String{int_val2} == doctest::String{STR});
+
+    auto cpy_res = val.copy();
+    REQUIRE(cpy_res.has_value());
+    auto& cpy = *cpy_res;
+
+    auto int_val3 = cpy.as_type<char[sizeof(STR)]>();
+    REQUIRE(int_val3 != nullptr);
+    REQUIRE(int_val3 != int_val2);
+    REQUIRE(*int_val2 == *int_val3);
+    auto span = val.as_span<char>();
+    REQUIRE(span.size() == sizeof(STR));
+  }
   SUBCASE("basic bind trivial")
   {
     auto _CxxBindingBasicPOD = bind_type<CxxBindingBasicPOD>(
@@ -101,6 +131,10 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     *a_ptr = 10;
 
     REQUIRE(ptr->a == 10);
+
+    auto span = val.as_span<CxxBindingBasicPOD>();
+    REQUIRE(span.size() == 1);
+    REQUIRE(span[0].a == 10);
 
     for (auto [name, desc, type, _] : val.reflect())
     {
