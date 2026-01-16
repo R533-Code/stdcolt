@@ -9,3 +9,10 @@ ec_add_tests(test_runtime_type OUT _test
     TESTING_FRAMEWORK doctest
     LINK_WITH ${_runtime_type}
 )
+
+if(STDCOLT_BUILD_PYTHON_BINDINGS)
+    ec_add_python_bindings(pycolt_ext_runtime_type
+        BINDING_FRAMEWORK nanobind
+        LINK_WITH PUBLIC ${_runtime_type}
+    )
+endif()
