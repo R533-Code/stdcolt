@@ -113,8 +113,8 @@ if(STDCOLT_BUILD_DOC)
         message(STATUS "Found Doxygen executable.")
 
         # set input and output files
-        set(DOXYGEN_IN ${CMAKE_SOURCE_DIR}/resources/Doxyfile.in)
-        set(DOXYGEN_OUT ${CMAKE_SOURCE_DIR}/docs/Doxyfile.out)
+        set(DOXYGEN_IN "${CMAKE_CURRENT_SOURCE_DIR}/resources/Doxyfile.in")
+        set(DOXYGEN_OUT "${CMAKE_CURRENT_SOURCE_DIR}/docs/Doxyfile.out")
 
         message(STATUS "Configuring Doxygen input file...\n")
 
