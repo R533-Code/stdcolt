@@ -15,7 +15,7 @@ message(STATUS "Using stdcolt v${PROJECT_VERSION}")
 # ###########################
 
 # The root directory of the STDCOLT project
-set(STDCOLT_ROOT_DIR "${CMAKE_SOURCE_DIR}")
+set(STDCOLT_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 cmake_path(NORMAL_PATH STDCOLT_ROOT_DIR)
 
 # The 3rd party directory
@@ -34,14 +34,26 @@ set(CMAKE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/dist/" CACHE PATH "" FORCE)
 # ###########################
 add_subdirectory("3rd_party/ECMake")
 
+option(STDCOLT_BUILD_DOC
+    "Build the stdcolt documentation"
+    ON
+)
+option(STDCOLT_BUILD_PYTHON_BINDINGS
+    "Set to true to build python bindings of the C++ code"
+    ${PROJECT_IS_TOP_LEVEL}
+)
+option(STDCOLT_ENABLE_TESTS 
+    "Set to true to build the tests of the C++ library" 
+    ${PROJECT_IS_TOP_LEVEL}
+)
+option(STDCOLT_ENABLE_BENCHMARK 
+    "Set to true to build the benchmarks of the C++ library" 
+    ${PROJECT_IS_TOP_LEVEL}
+)
+
 # ###########################
 # Set C++/python bindings
 # ###########################
-option(STDCOLT_BUILD_PYTHON_BINDINGS
-    "Set to true to build python bindings of the C++ code"
-    ON
-)
-
 if(STDCOLT_BUILD_PYTHON_BINDINGS)
     find_package(Python 3.13 REQUIRED COMPONENTS Interpreter Development)
     ec_add_subdirectory("3rd_party/nanobind")
@@ -50,12 +62,16 @@ endif()
 # ###########################
 # Setup C++ testing framework
 # ###########################
-ec_add_subdirectory_static("3rd_party/doctest")
+if (STDCOLT_ENABLE_TESTS)
+    ec_add_subdirectory_static("3rd_party/doctest")
+endif()
 
 # ###########################
 # Setup benchmark framework
 # ###########################
-ec_add_subdirectory_static("3rd_party/nanobench")
+if (STDCOLT_ENABLE_BENCHMARK)
+    ec_add_subdirectory_static("3rd_party/nanobench")
+endif()
 
 # ###########################
 # Setup stdcolt
@@ -90,8 +106,6 @@ ec_endnamespace(stdcolt)
 # #################
 # DOXYGEN
 # #################
-option(STDCOLT_BUILD_DOC "build stdcolt documentation" ON)
-
 if(STDCOLT_BUILD_DOC)
     find_package(Doxygen)
 
