@@ -8,10 +8,9 @@ ec_add_library_dynamic(type_erase OUT _type_erase
     LINK_WITH PUBLIC ${_macros} ${_contracts}
 )
 
-ec_add_tests(test_type_erase OUT _test
-    TESTING_FRAMEWORK doctest
-    LINK_WITH ${_type_erase}
-)
-
-ec_copy_dependencies(${_type_erase})
-ec_copy_dependencies(${_test})
+if (STDCOLT_ENABLE_TESTS)
+    ec_add_tests(test_type_erase OUT _test
+        TESTING_FRAMEWORK doctest
+        LINK_WITH ${_type_erase}
+    )
+endif()

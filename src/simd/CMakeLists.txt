@@ -17,10 +17,9 @@ target_include_directories(${_simd} PUBLIC "3rd_party/libsimdpp")
 # fix sources of simd target:
 target_sources(${_simd} PRIVATE ${STDCOLT_SIMD_OBJS})
 
-ec_add_tests(test_simd OUT _test
-    TESTING_FRAMEWORK doctest
-    LINK_WITH ${_simd}
-)
-
-ec_copy_dependencies(${_simd})
-ec_copy_dependencies(${_test})
+if (STDCOLT_ENABLE_TESTS)
+    ec_add_tests(test_simd OUT _test
+        TESTING_FRAMEWORK doctest
+        LINK_WITH ${_simd}
+    )
+endif()

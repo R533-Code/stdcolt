@@ -5,10 +5,12 @@ ec_add_library_dynamic(runtime_type OUT _runtime_type
 	LINK_WITH PUBLIC stdcolt::allocators stdcolt::contracts
 )
 
-ec_add_tests(test_runtime_type OUT _test
-    TESTING_FRAMEWORK doctest
-    LINK_WITH ${_runtime_type}
-)
+if (STDCOLT_ENABLE_TESTS)
+    ec_add_tests(test_runtime_type OUT _test
+        TESTING_FRAMEWORK doctest
+        LINK_WITH ${_runtime_type}
+    )
+endif()
 
 if(STDCOLT_BUILD_PYTHON_BINDINGS)
     ec_add_python_bindings(pycolt_ext_runtime_type

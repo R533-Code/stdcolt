@@ -4,5 +4,3 @@ ec_get_target(macros _macros)
 ec_add_library_dynamic(debugging OUT _debugging
     LINK_WITH PUBLIC ${_macros}
 )
-
-ec_copy_dependencies(${_debugging})

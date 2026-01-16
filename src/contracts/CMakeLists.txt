@@ -6,10 +6,9 @@ ec_add_library_dynamic(contracts OUT _contracts
     LINK_WITH PRIVATE cpptrace::cpptrace PUBLIC ${_debugging}
 )
 
-ec_add_tests(test_contracts OUT _test
-    TESTING_FRAMEWORK doctest
-    LINK_WITH ${_contracts}
-)
-
-ec_copy_dependencies(${_contracts})
-ec_copy_dependencies(${_test})
+if (STDCOLT_ENABLE_TESTS)
+    ec_add_tests(test_contracts OUT _test
+        TESTING_FRAMEWORK doctest
+        LINK_WITH ${_contracts}
+    )
+endif()

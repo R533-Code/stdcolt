@@ -6,13 +6,12 @@ ec_add_library_dynamic(coroutines OUT _coroutines
     LINK_WITH PUBLIC ${_contracts} concurrentqueue
 )
 
-ec_add_tests(test_coroutines OUT _test
-    TESTING_FRAMEWORK doctest
-    LINK_WITH ${_coroutines}
-)
-
-ec_copy_dependencies(${_coroutines})
-ec_copy_dependencies(${_test})
+if (STDCOLT_ENABLE_TESTS)
+    ec_add_tests(test_coroutines OUT _test
+        TESTING_FRAMEWORK doctest
+        LINK_WITH ${_coroutines}
+    )
+endif()
 
 if(STDCOLT_BUILD_PYTHON_BINDINGS)
     ec_add_python_bindings(pycolt_coroutines
