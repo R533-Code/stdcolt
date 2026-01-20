@@ -733,45 +733,45 @@ TEST_CASE("stdcolt/extensions/runtime_type: opaque registration set/get/overwrit
   stdcolt_ext_rt_destroy(ctx);
 }
 
-TEST_CASE("stdcolt/extensions/runtime_type: Value construction modes and destroy "
+TEST_CASE("stdcolt/extensions/runtime_type: Any construction modes and destroy "
           "clears header")
 {
   auto* ctx = require_ctx();
 
   SUBCASE("empty is noop")
   {
-    stdcolt_ext_rt_Value v{};
-    stdcolt_ext_rt_val_construct_empty(&v);
+    stdcolt_ext_rt_Any v{};
+    stdcolt_ext_rt_any_construct_empty(&v);
     CHECK(v.header.type == nullptr);
     CHECK(v.header.address == nullptr);
-    stdcolt_ext_rt_val_destroy(&v);
+    stdcolt_ext_rt_any_destroy(&v);
     CHECK(v.header.type == nullptr);
     CHECK(v.header.address == nullptr);
   }
 
   SUBCASE("SBO object clears header on destroy")
   {
-    stdcolt_ext_rt_Value v{};
+    stdcolt_ext_rt_Any v{};
     auto t_i32 =
         stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I32);
     REQUIRE(t_i32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
     REQUIRE(
-        stdcolt_ext_rt_val_construct(&v, t_i32.data.success.type)
+        stdcolt_ext_rt_any_init(&v, t_i32.data.success.type)
         == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(v.header.type == t_i32.data.success.type);
     CHECK(v.header.address != nullptr);
 
     *reinterpret_cast<int32_t*>(v.header.address) = 123;
 
-    stdcolt_ext_rt_val_destroy(&v);
+    stdcolt_ext_rt_any_destroy(&v);
     CHECK(v.header.type == nullptr);
     CHECK(v.header.address == nullptr);
   }
 
   SUBCASE("heap object clears header on destroy")
   {
-    stdcolt_ext_rt_Value v{};
+    stdcolt_ext_rt_Any v{};
     auto u8 =
         stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U8);
     REQUIRE(u8.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
@@ -780,12 +780,12 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value construction modes and destroy
     REQUIRE(big.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
     REQUIRE(
-        stdcolt_ext_rt_val_construct(&v, big.data.success.type)
+        stdcolt_ext_rt_any_init(&v, big.data.success.type)
         == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(v.header.type == big.data.success.type);
     CHECK(v.header.address != nullptr);
 
-    stdcolt_ext_rt_val_destroy(&v);
+    stdcolt_ext_rt_any_destroy(&v);
     CHECK(v.header.type == nullptr);
     CHECK(v.header.address == nullptr);
   }
@@ -820,8 +820,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: Runtime type lifetime recursion: "
   REQUIRE(outer.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
   auto* t_outer = outer.data.success.type;
 
-  stdcolt_ext_rt_Value v{};
-  REQUIRE(stdcolt_ext_rt_val_construct(&v, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+  stdcolt_ext_rt_Any v{};
+  REQUIRE(stdcolt_ext_rt_any_init(&v, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
   auto nm  = sv("m");
   auto off = stdcolt_ext_rt_type_lookup(t_outer, &nm, t_dt);
@@ -830,7 +830,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: Runtime type lifetime recursion: "
   void* member_addr = (uint8_t*)v.header.address + found_addr(off);
   std::construct_at(reinterpret_cast<DtorCounter*>(member_addr));
 
-  stdcolt_ext_rt_val_destroy(&v);
+  stdcolt_ext_rt_any_destroy(&v);
   CHECK(DtorCounter::dtors.load() == 1);
 
   stdcolt_ext_rt_destroy(ctx);
@@ -879,9 +879,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: Copy rollback destroys already-copie
   REQUIRE(outer.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
   auto* t_outer = outer.data.success.type;
 
-  stdcolt_ext_rt_Value src{};
-  REQUIRE(
-      stdcolt_ext_rt_val_construct(&src, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+  stdcolt_ext_rt_Any src{};
+  REQUIRE(stdcolt_ext_rt_any_init(&src, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
   auto na    = sv("a");
   auto nb    = sv("b");
@@ -896,18 +895,18 @@ TEST_CASE("stdcolt/extensions/runtime_type: Copy rollback destroys already-copie
   std::construct_at(reinterpret_cast<DtorCounter*>(a_addr));
   *reinterpret_cast<uint8_t*>(b_addr) = 7;
 
-  stdcolt_ext_rt_Value dst{};
-  auto ok = stdcolt_ext_rt_val_construct_from_copy(&dst, &src);
+  stdcolt_ext_rt_Any dst{};
+  auto ok = stdcolt_ext_rt_any_construct_from_copy(&dst, &src);
   CHECK(ok != STDCOLT_EXT_RT_VALUE_SUCCESS);
   CHECK(dst.header.type == nullptr);
   CHECK(dst.header.address == nullptr);
   CHECK(DtorCounter::dtors.load() == 1);
 
-  stdcolt_ext_rt_val_destroy(&src);
+  stdcolt_ext_rt_any_destroy(&src);
   stdcolt_ext_rt_destroy(ctx);
 }
 
-TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Value "
+TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Any "
           "(and arrays recurse)")
 {
   auto* ctx = require_ctx();
@@ -944,12 +943,11 @@ TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Va
     int a0 = g_counting.allocs.load();
     int d0 = g_counting.deallocs.load();
 
-    stdcolt_ext_rt_Value v1{};
-    REQUIRE(
-        stdcolt_ext_rt_val_construct(&v1, t_big) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    stdcolt_ext_rt_Any v1{};
+    REQUIRE(stdcolt_ext_rt_any_init(&v1, t_big) == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(g_counting.allocs.load() == a0 + 1);
 
-    stdcolt_ext_rt_val_destroy(&v1);
+    stdcolt_ext_rt_any_destroy(&v1);
     CHECK(g_counting.deallocs.load() == d0 + 1);
   }
 
@@ -963,12 +961,11 @@ TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Va
     int a1 = g_counting.allocs.load();
     int d1 = g_counting.deallocs.load();
 
-    stdcolt_ext_rt_Value v2{};
-    REQUIRE(
-        stdcolt_ext_rt_val_construct(&v2, t_arr) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    stdcolt_ext_rt_Any v2{};
+    REQUIRE(stdcolt_ext_rt_any_init(&v2, t_arr) == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(g_counting.allocs.load() == a1 + 1);
 
-    stdcolt_ext_rt_val_destroy(&v2);
+    stdcolt_ext_rt_any_destroy(&v2);
     CHECK(g_counting.deallocs.load() == d1 + 1);
   }
 
@@ -980,13 +977,13 @@ TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by Va
 
     int a2 = g_counting.allocs.load();
 
-    stdcolt_ext_rt_Value v3{};
+    stdcolt_ext_rt_Any v3{};
     REQUIRE(
-        stdcolt_ext_rt_val_construct(&v3, t_u64.data.success.type)
+        stdcolt_ext_rt_any_init(&v3, t_u64.data.success.type)
         == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(g_counting.allocs.load() == a2);
 
-    stdcolt_ext_rt_val_destroy(&v3);
+    stdcolt_ext_rt_any_destroy(&v3);
   }
 
   stdcolt_ext_rt_destroy(ctx);
@@ -1100,7 +1097,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: type_create_ptr/array/fn invalid par
   stdcolt_ext_rt_destroy(ctx);
 }
 
-TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preserves "
+TEST_CASE("stdcolt/extensions/runtime_type: Any move steals storage and preserves "
           "bits (SBO and heap)")
 {
   auto* ctx = require_ctx();
@@ -1111,14 +1108,14 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
         stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I32);
     REQUIRE(t_i32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
-    stdcolt_ext_rt_Value src{};
+    stdcolt_ext_rt_Any src{};
     REQUIRE(
-        stdcolt_ext_rt_val_construct(&src, t_i32.data.success.type)
+        stdcolt_ext_rt_any_init(&src, t_i32.data.success.type)
         == STDCOLT_EXT_RT_VALUE_SUCCESS);
     *reinterpret_cast<int32_t*>(src.header.address) = 123;
 
-    stdcolt_ext_rt_Value dst{};
-    stdcolt_ext_rt_val_construct_from_move(&dst, &src);
+    stdcolt_ext_rt_Any dst{};
+    stdcolt_ext_rt_any_construct_from_move(&dst, &src);
 
     CHECK(src.header.type == nullptr);
     CHECK(src.header.address == nullptr);
@@ -1127,8 +1124,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
     REQUIRE(dst.header.address != nullptr);
     CHECK(*reinterpret_cast<int32_t*>(dst.header.address) == 123);
 
-    stdcolt_ext_rt_val_destroy(&dst);
-    stdcolt_ext_rt_val_destroy(&src);
+    stdcolt_ext_rt_any_destroy(&dst);
+    stdcolt_ext_rt_any_destroy(&src);
   }
 
   SUBCASE("heap: big array storage pointer is stolen; bytes preserved; source "
@@ -1141,9 +1138,9 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
     auto big = stdcolt_ext_rt_type_create_array(ctx, u8.data.success.type, 512);
     REQUIRE(big.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
-    stdcolt_ext_rt_Value src{};
+    stdcolt_ext_rt_Any src{};
     REQUIRE(
-        stdcolt_ext_rt_val_construct(&src, big.data.success.type)
+        stdcolt_ext_rt_any_init(&src, big.data.success.type)
         == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
     auto* p = reinterpret_cast<uint8_t*>(src.header.address);
@@ -1152,8 +1149,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
 
     void* stolen_ptr = src.header.address;
 
-    stdcolt_ext_rt_Value dst{};
-    stdcolt_ext_rt_val_construct_from_move(&dst, &src);
+    stdcolt_ext_rt_Any dst{};
+    stdcolt_ext_rt_any_construct_from_move(&dst, &src);
 
     CHECK(src.header.type == nullptr);
     CHECK(src.header.address == nullptr);
@@ -1166,14 +1163,14 @@ TEST_CASE("stdcolt/extensions/runtime_type: Value move steals storage and preser
     CHECK(q[0] == 0xAB);
     CHECK(q[511] == 0xCD);
 
-    stdcolt_ext_rt_val_destroy(&dst);
-    stdcolt_ext_rt_val_destroy(&src);
+    stdcolt_ext_rt_any_destroy(&dst);
+    stdcolt_ext_rt_any_destroy(&src);
   }
 
   stdcolt_ext_rt_destroy(ctx);
 }
 
-TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + deep "
+TEST_CASE("stdcolt/extensions/runtime_type: any_construct_from_copy success + deep "
           "rollback recursion")
 {
   auto* ctx = require_ctx();
@@ -1189,14 +1186,14 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     REQUIRE(t_res.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
     auto* t = t_res.data.success.type;
 
-    stdcolt_ext_rt_Value src{};
-    REQUIRE(stdcolt_ext_rt_val_construct(&src, t) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    stdcolt_ext_rt_Any src{};
+    REQUIRE(stdcolt_ext_rt_any_init(&src, t) == STDCOLT_EXT_RT_VALUE_SUCCESS);
     auto* ps = reinterpret_cast<uint8_t*>(src.header.address);
     for (int i = 0; i < 8; ++i)
       ps[i] = static_cast<uint8_t>(0xA0 + i);
 
-    stdcolt_ext_rt_Value dst{};
-    auto ok = stdcolt_ext_rt_val_construct_from_copy(&dst, &src);
+    stdcolt_ext_rt_Any dst{};
+    auto ok = stdcolt_ext_rt_any_construct_from_copy(&dst, &src);
     CHECK(ok == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(dst.header.type == t);
     REQUIRE(dst.header.address != nullptr);
@@ -1205,8 +1202,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     for (int i = 0; i < 8; ++i)
       CHECK(pd[i] == static_cast<uint8_t>(0xA0 + i));
 
-    stdcolt_ext_rt_val_destroy(&dst);
-    stdcolt_ext_rt_val_destroy(&src);
+    stdcolt_ext_rt_any_destroy(&dst);
+    stdcolt_ext_rt_any_destroy(&src);
   }
 
   SUBCASE("copy success: trivially copyable builtin array")
@@ -1218,9 +1215,9 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     auto t_arr = stdcolt_ext_rt_type_create_array(ctx, u32.data.success.type, 4);
     REQUIRE(t_arr.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
-    stdcolt_ext_rt_Value src{};
+    stdcolt_ext_rt_Any src{};
     REQUIRE(
-        stdcolt_ext_rt_val_construct(&src, t_arr.data.success.type)
+        stdcolt_ext_rt_any_init(&src, t_arr.data.success.type)
         == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
     auto* a = reinterpret_cast<uint32_t*>(src.header.address);
@@ -1229,8 +1226,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     a[2]    = 30;
     a[3]    = 40;
 
-    stdcolt_ext_rt_Value dst{};
-    auto ok = stdcolt_ext_rt_val_construct_from_copy(&dst, &src);
+    stdcolt_ext_rt_Any dst{};
+    auto ok = stdcolt_ext_rt_any_construct_from_copy(&dst, &src);
     CHECK(ok == STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(dst.header.type == t_arr.data.success.type);
 
@@ -1240,8 +1237,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     CHECK(b[2] == 30);
     CHECK(b[3] == 40);
 
-    stdcolt_ext_rt_val_destroy(&dst);
-    stdcolt_ext_rt_val_destroy(&src);
+    stdcolt_ext_rt_any_destroy(&dst);
+    stdcolt_ext_rt_any_destroy(&src);
   }
 
   SUBCASE("deep rollback: destroys already-copied members across nesting when inner "
@@ -1301,9 +1298,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     auto* t_outer = outer_res.data.success.type;
 
     // Build src
-    stdcolt_ext_rt_Value src{};
-    REQUIRE(
-        stdcolt_ext_rt_val_construct(&src, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    stdcolt_ext_rt_Any src{};
+    REQUIRE(stdcolt_ext_rt_any_init(&src, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
     auto na    = sv("a");
     auto ni    = sv("i");
@@ -1329,17 +1325,264 @@ TEST_CASE("stdcolt/extensions/runtime_type: val_construct_from_copy success + de
     std::construct_at(reinterpret_cast<DtorCounter*>(b_addr));
     *reinterpret_cast<uint8_t*>(c_addr) = 7;
 
-    stdcolt_ext_rt_Value dst{};
-    auto ok = stdcolt_ext_rt_val_construct_from_copy(&dst, &src);
+    stdcolt_ext_rt_Any dst{};
+    auto ok = stdcolt_ext_rt_any_construct_from_copy(&dst, &src);
     CHECK(ok != STDCOLT_EXT_RT_VALUE_SUCCESS);
     CHECK(dst.header.type == nullptr);
     CHECK(dst.header.address == nullptr);
 
     CHECK(DtorCounter::dtors.load() == 2); // rollback copies
 
-    stdcolt_ext_rt_val_destroy(&src);
+    stdcolt_ext_rt_any_destroy(&src);
     CHECK(DtorCounter::dtors.load() == 4);
   }
 
   stdcolt_ext_rt_destroy(ctx);
+}
+
+TEST_CASE("stdcolt/extensions/runtime_type: SharedAny/WeakAny basic lifetime + lock")
+{
+  auto* ctx = require_ctx();
+
+  SUBCASE("SharedAny empty is noop + destroy clears header")
+  {
+    stdcolt_ext_rt_SharedAny s{};
+    stdcolt_ext_rt_sany_construct_empty(&s);
+    CHECK(s.header.type == nullptr);
+    CHECK(s.header.address == nullptr);
+    CHECK(s.control_block == nullptr);
+
+    stdcolt_ext_rt_sany_destroy(&s);
+    CHECK(s.header.type == nullptr);
+    CHECK(s.header.address == nullptr);
+    CHECK(s.control_block == nullptr);
+  }
+
+  SUBCASE("WeakAny empty is noop + destroy clears fields")
+  {
+    stdcolt_ext_rt_WeakAny w{};
+    w.address       = nullptr;
+    w.control_block = nullptr;
+
+    stdcolt_ext_rt_wany_destroy(&w);
+    CHECK(w.address == nullptr);
+    CHECK(w.control_block == nullptr);
+  }
+
+  SUBCASE("SharedAny init builtin + copy shares storage; destroy clears")
+  {
+    auto t_u32 =
+        stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U32);
+    REQUIRE(t_u32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+
+    stdcolt_ext_rt_SharedAny s1{};
+    REQUIRE(
+        stdcolt_ext_rt_sany_init(&s1, t_u32.data.success.type)
+        == STDCOLT_EXT_RT_VALUE_SUCCESS);
+
+    REQUIRE(s1.header.type == t_u32.data.success.type);
+    REQUIRE(s1.header.address != nullptr);
+    REQUIRE(s1.control_block != nullptr);
+
+    *reinterpret_cast<uint32_t*>(s1.header.address) = 10;
+
+    stdcolt_ext_rt_SharedAny s2{};
+    stdcolt_ext_rt_sany_construct_from_copy(&s2, &s1);
+
+    REQUIRE(s2.header.type == s1.header.type);
+    REQUIRE(s2.header.address == s1.header.address);
+    REQUIRE(s2.control_block == s1.control_block);
+
+    *reinterpret_cast<uint32_t*>(s2.header.address) = 99;
+    CHECK(*reinterpret_cast<uint32_t*>(s1.header.address) == 99);
+
+    stdcolt_ext_rt_sany_destroy(&s2);
+    CHECK(s2.header.type == nullptr);
+    CHECK(s2.header.address == nullptr);
+    CHECK(s2.control_block == nullptr);
+
+    // still alive via s1
+    CHECK(*reinterpret_cast<uint32_t*>(s1.header.address) == 99);
+
+    stdcolt_ext_rt_sany_destroy(&s1);
+    CHECK(s1.header.type == nullptr);
+    CHECK(s1.header.address == nullptr);
+    CHECK(s1.control_block == nullptr);
+  }
+
+  SUBCASE("WeakAny from SharedAny + lock succeeds; expires after last shared gone")
+  {
+    auto t_u32 =
+        stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U32);
+    REQUIRE(t_u32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+
+    stdcolt_ext_rt_WeakAny w{};
+    w.address       = nullptr;
+    w.control_block = nullptr;
+
+    {
+      stdcolt_ext_rt_SharedAny s{};
+      REQUIRE(
+          stdcolt_ext_rt_sany_init(&s, t_u32.data.success.type)
+          == STDCOLT_EXT_RT_VALUE_SUCCESS);
+
+      *reinterpret_cast<uint32_t*>(s.header.address) = 7;
+
+      stdcolt_ext_rt_wany_from_sany(&w, &s);
+      REQUIRE(w.control_block != nullptr);
+      REQUIRE(w.address == s.header.address);
+
+      stdcolt_ext_rt_SharedAny locked{};
+      bool ok = stdcolt_ext_rt_wany_try_lock(&locked, &w);
+      CHECK(ok == true);
+      REQUIRE(locked.header.type == t_u32.data.success.type);
+      REQUIRE(locked.header.address == s.header.address);
+      REQUIRE(locked.control_block == s.control_block);
+      CHECK(*reinterpret_cast<uint32_t*>(locked.header.address) == 7);
+
+      stdcolt_ext_rt_sany_destroy(&locked);
+      stdcolt_ext_rt_sany_destroy(&s);
+    }
+
+    // now expired
+    stdcolt_ext_rt_SharedAny locked2{};
+    bool ok2 = stdcolt_ext_rt_wany_try_lock(&locked2, &w);
+    CHECK(ok2 == false);
+    CHECK(locked2.header.type == nullptr);
+    CHECK(locked2.header.address == nullptr);
+    CHECK(locked2.control_block == nullptr);
+
+    stdcolt_ext_rt_wany_destroy(&w);
+    CHECK(w.address == nullptr);
+    CHECK(w.control_block == nullptr);
+  }
+
+  SUBCASE("try_lock_consume consumes weak on success")
+  {
+    auto t_u32 =
+        stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_U32);
+    REQUIRE(t_u32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+
+    stdcolt_ext_rt_SharedAny s{};
+    REQUIRE(
+        stdcolt_ext_rt_sany_init(&s, t_u32.data.success.type)
+        == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    *reinterpret_cast<uint32_t*>(s.header.address) = 55;
+
+    stdcolt_ext_rt_WeakAny w{};
+    stdcolt_ext_rt_wany_from_sany(&w, &s);
+    REQUIRE(w.control_block != nullptr);
+
+    stdcolt_ext_rt_SharedAny out{};
+    bool ok = stdcolt_ext_rt_wany_try_lock_consume(&out, &w);
+    CHECK(ok == true);
+    CHECK(w.control_block == nullptr);
+    CHECK(w.address == nullptr);
+
+    REQUIRE(out.header.type == t_u32.data.success.type);
+    REQUIRE(out.header.address != nullptr);
+    CHECK(*reinterpret_cast<uint32_t*>(out.header.address) == 55);
+
+    stdcolt_ext_rt_sany_destroy(&out);
+    stdcolt_ext_rt_sany_destroy(&s);
+  }
+
+  stdcolt_ext_rt_destroy(ctx);
+}
+
+TEST_CASE("stdcolt/extensions/runtime_type: SharedAny destroy runs recursive dtors "
+          "(array and named)")
+{
+  auto* ctx = require_ctx();
+  DtorCounter::dtors.store(0);
+
+  // Create named DtorCounter type (non-trivial)
+  stdcolt_ext_rt_MemberView empty_members{nullptr, 0};
+  auto lt   = dtorcounter_lifetime();
+  auto n_dt = sv("DtorCounter_Shared");
+  auto dt   = stdcolt_ext_rt_type_create(
+      ctx, &n_dt, &empty_members, alignof(DtorCounter), sizeof(DtorCounter), &lt,
+      nullptr, nullptr);
+  REQUIRE(dt.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+  auto* t_dt = dt.data.success.type;
+
+  // Array of DtorCounter
+  auto arr = stdcolt_ext_rt_type_create_array(ctx, t_dt, 3);
+  REQUIRE(arr.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+  auto* t_arr = arr.data.success.type;
+
+  stdcolt_ext_rt_SharedAny s{};
+  REQUIRE(stdcolt_ext_rt_sany_init(&s, t_arr) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+  REQUIRE(s.header.address != nullptr);
+
+  // Construct elements in-place
+  auto* base = reinterpret_cast<uint8_t*>(s.header.address);
+  for (int i = 0; i < 3; ++i)
+  {
+    void* elem = base + i * static_cast<size_t>(t_dt->type_size);
+    std::construct_at(reinterpret_cast<DtorCounter*>(elem));
+  }
+
+  stdcolt_ext_rt_sany_destroy(&s);
+  CHECK(DtorCounter::dtors.load() == 3);
+
+  stdcolt_ext_rt_destroy(ctx);
+}
+
+TEST_CASE("stdcolt/extensions/runtime_type: Custom allocator override used by "
+          "SharedAny (and arrays recurse)")
+{
+  auto* ctx = require_ctx();
+
+  g_counting.constructs.store(0);
+  g_counting.destructs.store(0);
+  g_counting.allocs.store(0);
+  g_counting.deallocs.store(0);
+
+  auto counting = make_global_counting_allocator_recipe();
+  auto phf      = default_phf_recipe();
+  auto triv_lt  = trivially_copyable_lifetime();
+  stdcolt_ext_rt_MemberView empty_members{nullptr, 0};
+
+  auto n_big  = sv("AllocNamedBig_Shared");
+  auto tn_big = stdcolt_ext_rt_type_create(
+      ctx, &n_big, &empty_members, 8, 256, &triv_lt, &counting, &phf);
+  REQUIRE(tn_big.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+  auto* t_big = tn_big.data.success.type;
+  REQUIRE(t_big != nullptr);
+  CHECK(g_counting.constructs.load() == 1);
+
+  // 1) SharedAny of named type should allocate via override allocator
+  {
+    int a0 = g_counting.allocs.load();
+    int d0 = g_counting.deallocs.load();
+
+    stdcolt_ext_rt_SharedAny s{};
+    REQUIRE(stdcolt_ext_rt_sany_init(&s, t_big) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    CHECK(g_counting.allocs.load() == a0 + 1);
+
+    stdcolt_ext_rt_sany_destroy(&s);
+    CHECK(g_counting.deallocs.load() == d0 + 1);
+  }
+
+  // 2) Array of named should recurse and also use override allocator
+  {
+    auto arr_res = stdcolt_ext_rt_type_create_array(ctx, t_big, 4);
+    REQUIRE(arr_res.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
+    auto* t_arr = arr_res.data.success.type;
+    REQUIRE(t_arr != nullptr);
+
+    int a1 = g_counting.allocs.load();
+    int d1 = g_counting.deallocs.load();
+
+    stdcolt_ext_rt_SharedAny s{};
+    REQUIRE(stdcolt_ext_rt_sany_init(&s, t_arr) == STDCOLT_EXT_RT_VALUE_SUCCESS);
+    CHECK(g_counting.allocs.load() == a1 + 1);
+
+    stdcolt_ext_rt_sany_destroy(&s);
+    CHECK(g_counting.deallocs.load() == d1 + 1);
+  }
+
+  stdcolt_ext_rt_destroy(ctx);
+  CHECK(g_counting.destructs.load() == 1);
 }
