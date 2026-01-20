@@ -452,20 +452,20 @@ extern "C"
     } data;
   } stdcolt_ext_rt_ResultLookup;
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a RuntimeContext.
   /// @param alloc The allocator to use for all VTable allocations
   /// @param phf The default perfect hash function builder to use for named types
   /// @return RuntimeContextResult.
   /// To prevent memory leaks, use `rt_destroy` on the resulting non-null context.
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultRuntimeContext stdcolt_ext_rt_create(
       const stdcolt_ext_rt_RecipeAllocator* alloc,
       const stdcolt_ext_rt_RecipePerfectHashFunction* phf);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Destroys all resources associated with a `RuntimeContext`.
   /// @warning Any usage of the context afterwards causes UB!
   /// @param ctx The context (or nullptr)
-  STDCOLT_RUNTIME_TYPE_EXPORT
   void stdcolt_ext_rt_destroy(stdcolt_ext_rt_RuntimeContext* ctx);
 
   /*****************************/
@@ -495,6 +495,7 @@ extern "C"
     uint64_t is_trivially_copyable : 1;
   } stdcolt_ext_rt_NamedLifetime;
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a named type from members
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param name The name of the type (those exact bytes should be used to do a lookup)
@@ -507,7 +508,6 @@ extern "C"
   /// @param phf_override If not null, the perfect hash function of the current type will use that.
   /// If this parameter is null, the default perfect hash function of the RuntimeContext is used.
   /// @return A Type or an error type on invalid parameters.
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create(
       stdcolt_ext_rt_RuntimeContext* ctx, const stdcolt_ext_rt_StringView* name,
       const stdcolt_ext_rt_MemberView* members, uint64_t align, uint64_t size,
@@ -515,6 +515,7 @@ extern "C"
       const stdcolt_ext_rt_RecipeAllocator* alloc_override,
       const stdcolt_ext_rt_RecipePerfectHashFunction* phf_override);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a named type from a list of fields.
   /// This computes the offsets of the fields at runtime, then
   /// calls `rt_type_create` with those offsets.
@@ -527,13 +528,13 @@ extern "C"
   /// @param phf_override If not null, the perfect hash function of the current type will use that.
   /// If this parameter is null, the default perfect hash function of the RuntimeContext is used.
   /// @return A Type or an error type on invalid parameters.
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_runtime(
       stdcolt_ext_rt_RuntimeContext* ctx, const stdcolt_ext_rt_StringView* name,
       const stdcolt_ext_rt_MemberInfoView* members, stdcolt_ext_rt_Layout layout,
       const stdcolt_ext_rt_RecipeAllocator* alloc_override,
       const stdcolt_ext_rt_RecipePerfectHashFunction* phf_override);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Does a fast lookup for a member.
   /// Fast lookups do not verify the actual name of the member, its
   /// hash is used for equality checks. The type is always compared for equality,
@@ -546,11 +547,11 @@ extern "C"
   /// @param name The name of the type (exact same bytes as the one used in `rt_type_create`)
   /// @param expected_type The expected type of the member
   /// @return LookupResult
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_type_lookup_fast(
       stdcolt_ext_rt_Type type_to_lookup, const stdcolt_ext_rt_StringView* name,
       stdcolt_ext_rt_Type expected_type);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Does a lookup for a member.
   /// This function is guaranteed to never generate false positives:
   /// the actual name is compared, not the hashes. Use this for untrusted inputs.
@@ -558,7 +559,6 @@ extern "C"
   /// @param name The name of the type (exact same bytes as the one used in `rt_type_create`)
   /// @param expected_type The expected type of the member
   /// @return LookupResult
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_type_lookup(
       stdcolt_ext_rt_Type type_to_lookup, const stdcolt_ext_rt_StringView* name,
       stdcolt_ext_rt_Type expected_type);
@@ -567,88 +567,88 @@ extern "C"
   // REFLECTION
   /*****************************/
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Returns the name of a named type.
   /// @param type The named type
   /// @return Empty string view or view over the name of the type
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_StringView stdcolt_ext_rt_reflect_name(stdcolt_ext_rt_Type type);
 
   /// @brief Opaque iterator handle
   struct stdcolt_ext_rt_ReflectIterator;
   typedef struct stdcolt_ext_rt_ReflectIterator stdcolt_ext_rt_ReflectIterator;
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates an iterator to reflect on a type.
   /// If the returned iterator is not null, then it must be advanced
   /// before being read.
   /// @param type The type to reflect against
   /// @return null or a valid iterator to pass to `reflect_advance` and `reflect_read`
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_create(
       stdcolt_ext_rt_Type type);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Reads from an iterator.
   /// The iterator must be advanced before reading.
   /// The returned member info's data is owned by the context/type,
   /// do not free any of the views!
   /// @param iter The iterator (not null!)
   /// @return The member info
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_Member stdcolt_ext_rt_reflect_read(
       stdcolt_ext_rt_ReflectIterator* iter);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Advances the iterator.
   /// This function advances the iterators, and returns null
   /// to mark end of iteration.
   /// @param iter The iterator to advance (or null)
   /// @return The updated iterator
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ReflectIterator* stdcolt_ext_rt_reflect_advance(
       stdcolt_ext_rt_ReflectIterator* iter);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Destroys an iterator.
   /// This function is only needed if iteration is stopped before
   /// `reflect_advance` returns null. This is a no-op if iter is null.
   /// @param iter The iterator or null
-  STDCOLT_RUNTIME_TYPE_EXPORT
   void stdcolt_ext_rt_reflect_destroy(stdcolt_ext_rt_ReflectIterator* iter);
 
   /*****************************/
   // BUILTIN TYPES
   /*****************************/
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a builtin type
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param type The built-in type kind
   /// @return built-in type
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_builtin(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_BuiltInType type);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a pointer to a type
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param pointee The type pointed to (not null!)
   /// @param pointee_is_const If true, the pointer to const
   /// @return pointer type
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_ptr(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_Type pointee,
       bool pointee_is_const);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates an array of a type
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param type The type of the array (not null!)
   /// @param size The size of the array
   /// @return array type
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_array(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_Type type, uint64_t size);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a function type
   /// @param ctx The context that owns the resulting type (not null!)
   /// @param ret The return of the function or null for function that return nothing
   /// @param args The argument types of the function (none null and all owned by ctx)
   /// @return function type
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultType stdcolt_ext_rt_type_create_fn(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_Type ret,
       stdcolt_ext_rt_TypeView args);
@@ -660,21 +660,21 @@ extern "C"
   /// @brief An opaque type ID, that may be mapped to a `Type`
   typedef const void* stdcolt_ext_rt_OpaqueTypeID;
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Registers a type for a specific opaque type ID
   /// @param ctx The context in which to register
   /// @param id The opaque ID, must be unique for `type`
   /// @param type The type to register
   /// @return True on success
-  STDCOLT_RUNTIME_TYPE_EXPORT
   bool stdcolt_ext_rt_register_set_type(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id,
       stdcolt_ext_rt_Type type);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Returns a type previously registered
   /// @param ctx The context in which to lookup
   /// @param id The opaque ID used on registration
   /// @return The registered type or nullptr
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_Type stdcolt_ext_rt_register_get_type(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id);
 
@@ -700,60 +700,60 @@ extern "C"
     uint64_t tag2;
   } stdcolt_ext_rt_PreparedMember;
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a prepared member for faster repeated accesses to the same member.
   /// A prepared member allows faster lookups: use `rt_resolve_prepared_member`.
   /// @param owner_named The type in which to do the lookups
   /// @param member_name The member name to lookup (exact same bytes as the one used in `rt_type_create`)
   /// @param expected_type The expected type of the member
   /// @return PreparedMember
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_PreparedMember stdcolt_ext_rt_prepare_member(
       stdcolt_ext_rt_Type owner_named, const stdcolt_ext_rt_StringView* member_name,
       stdcolt_ext_rt_Type expected_type);
 
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Resolves a lookup from a prepared member
   /// @param pm The prepared member, obtained from `rt_prepare_member`.
   /// @return LookupResult
-  STDCOLT_RUNTIME_TYPE_EXPORT
   stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_resolve_prepared_member(
       const stdcolt_ext_rt_PreparedMember* pm);
 
   /*****************************/
-  // VALUE AND LIFETIME
+  // UNIQUE ANY
   /*****************************/
 
   /// @brief Header of all values
   typedef struct
   {
-    /// @brief Type of the value or nullptr for empty Value.
+    /// @brief Type of the value or nullptr for empty.
     /// Do not modify manually!
     stdcolt_ext_rt_Type type;
     /// @brief Pointer to the value, which is either inline or on the heap.
     /// This address is used to avoid branching. Do not modify manually!
     /// @pre Must never be null if type is not null.
     void* address;
-  } stdcolt_ext_rt_ValueHeader;
+  } stdcolt_ext_rt_AnyHeader;
 
   // TODO: handle alignment properly
 
-  /// @brief Alignment (in bytes) of inline buffer of `Value`.
+  /// @brief Alignment (in bytes) of inline buffer of `Any`.
   /// @warning Modification causes an ABI break!
 #define STDCOLT_EXT_RT_VALUE_SBO_ALIGN (sizeof(void*))
-  /// @brief Size (in bytes) of inline buffer of `Value`.
+  /// @brief Size (in bytes) of inline buffer of `Any`.
   /// @warning Modification causes an ABI break!
-#define STDCOLT_EXT_RT_VALUE_SBO_SIZE (128 - sizeof(stdcolt_ext_rt_ValueHeader))
+#define STDCOLT_EXT_RT_VALUE_SBO_SIZE (128 - sizeof(stdcolt_ext_rt_AnyHeader))
 
-  /// @brief Runtime value of any time
+  /// @brief Runtime value (single ownership) of any type
   typedef struct
   {
-    /// @brief Common header for all Value, may be read without methods.
+    /// @brief Common header for all Any, may be read without methods.
     /// Write to any of its member is UB.
-    stdcolt_ext_rt_ValueHeader header;
+    stdcolt_ext_rt_AnyHeader header;
 
     /// @brief Inline buffer used for Small Buffer Optimization (SBO).
     /// Accessing (read/write) is UB, only use methods!
     uint8_t inline_buffer[STDCOLT_EXT_RT_VALUE_SBO_SIZE];
-  } stdcolt_ext_rt_Value;
+  } stdcolt_ext_rt_Any;
 
   enum
   {
@@ -768,54 +768,172 @@ extern "C"
 
     STDCOLT_EXT_RT_VALUE_end
   };
-  /// @brief The result of fallible operations on `Value`
+  /// @brief The result of fallible operations on `Any`
   typedef uint8_t stdcolt_ext_rt_ResultValueKind;
 
-  /// @brief Initialize the storage of a `Value` for a specific type.
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Initialize the storage of a `Any` for a specific type.
   /// This function does not initialize the stored value: this is not
   /// a constructor call, this is a storage allocation. Initialization
   /// of the storage must be done through `header.address` if this function
-  /// returns true.
+  /// returns `STDCOLT_EXT_RT_VALUE_SUCCESS`.
   /// @param out The value to initialize (out param)
   /// @param type The type to store in the value or null for empty
   /// @return True on success, else failure
   /// @pre `out` may not be null, else UB!
-  STDCOLT_RUNTIME_TYPE_EXPORT
-  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_val_construct(
-      stdcolt_ext_rt_Value* out, stdcolt_ext_rt_Type type);
+  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_any_init(
+      stdcolt_ext_rt_Any* out, stdcolt_ext_rt_Type type);
 
-  /// @brief Constructs an empty `Value`.
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs an empty `Any`.
   /// Empty values do not need to be destroyed, and have `header.type == null`.
   /// This is guaranteed to not allocate, and always succeed.
   /// @param out The value to initialize
   /// @pre No parameter may be null, else UB!
-  STDCOLT_RUNTIME_TYPE_EXPORT
-  void stdcolt_ext_rt_val_construct_empty(stdcolt_ext_rt_Value* out);
+  void stdcolt_ext_rt_any_construct_empty(stdcolt_ext_rt_Any* out);
 
-  /// @brief Constructs a `Value` by stealing the storage from another `Value`.
-  /// The moved-from value is marked empty, as if initialized by `val_construct_empty`.
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs a `Any` by stealing the storage from another `Any`.
+  /// The moved-from value is marked empty, as if initialized by `any_construct_empty`.
   /// @param out The value to initialize (out param)
-  /// @param to_move `Value` from which to steal the storage, marked empty after the call
-  STDCOLT_RUNTIME_TYPE_EXPORT
-  void stdcolt_ext_rt_val_construct_from_move(
-      stdcolt_ext_rt_Value* out, stdcolt_ext_rt_Value* to_move);
+  /// @param to_move `Any` from which to steal the storage, marked empty after the call
+  void stdcolt_ext_rt_any_construct_from_move(
+      stdcolt_ext_rt_Any* out, stdcolt_ext_rt_Any* to_move);
 
-  /// @brief Tries to copy a `Value` to another.
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Tries to copy a `Any` to another.
   /// For a copy to be successful, the type stored in `to_copy` must support
   /// being copied, and storage allocation (if needed) should succeed.
-  /// On failure, `out` is marked empty, as if initialized by `val_construct_empty`.
-  /// @param out The value to copy
-  /// @param to_copy `Value` to copy.
+  /// On failure, `out` is marked empty, as if initialized by `any_construct_empty`.
+  /// @param out The value to initialize
+  /// @param to_copy `Any` to copy.
   /// @return True on success, false on failure
   /// @pre No parameter may be null, else UB!
-  STDCOLT_RUNTIME_TYPE_EXPORT
-  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_val_construct_from_copy(
-      stdcolt_ext_rt_Value* out, const stdcolt_ext_rt_Value* to_copy);
+  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_any_construct_from_copy(
+      stdcolt_ext_rt_Any* out, const stdcolt_ext_rt_Any* to_copy);
 
-  /// @brief Destroys the stored value then the storage of a Value.
-  /// @param val Value to destroy (or null), marked empty afterwards
   STDCOLT_RUNTIME_TYPE_EXPORT
-  void stdcolt_ext_rt_val_destroy(stdcolt_ext_rt_Value* val);
+  /// @brief Destroys the stored value then the storage of a Any.
+  /// @param val Any to destroy (or null), marked empty afterwards
+  void stdcolt_ext_rt_any_destroy(stdcolt_ext_rt_Any* val);
+
+  /*****************************/
+  // SHARED ANY
+  /*****************************/
+
+  /// @brief Runtime shared (reference counted) value of any type
+  typedef struct
+  {
+    /// @brief Common header for all Any, may be read without methods.
+    /// Write to any of its member is UB.
+    stdcolt_ext_rt_AnyHeader header;
+
+    /// @brief Pointer to control block.
+    /// Accessing (read/write) is UB, only use methods!
+    void* control_block;
+  } stdcolt_ext_rt_SharedAny;
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Initialize the storage of a `SharedAny` for a specific type.
+  /// This function does not initialize the stored value: this is not
+  /// a constructor call, this is a storage allocation. Initialization
+  /// of the storage must be done through `header.address` if this function
+  /// returns `STDCOLT_EXT_RT_VALUE_SUCCESS`.
+  /// @param out The value to initialize (out param)
+  /// @param type The type to store in the value or null for empty
+  /// @return True on success, else failure
+  /// @pre `out` may not be null, else UB!
+  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_sany_init(
+      stdcolt_ext_rt_SharedAny* out, stdcolt_ext_rt_Type type);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs an empty `SharedAny`.
+  /// Empty values do not need to be destroyed, and have `header.type == null`.
+  /// This is guaranteed to not allocate, and always succeed.
+  /// @param out The value to initialize
+  /// @pre No parameter may be null, else UB!
+  void stdcolt_ext_rt_sany_construct_empty(stdcolt_ext_rt_SharedAny* out);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs a `SharedAny` as a copy of another `SharedAny`.
+  /// Creates a new `SharedAny` in `out` that refers to the same underlying value as
+  /// `to_copy` and increments the underlying reference count.
+  /// @param out The value to initialize
+  /// @param to_copy `SharedAny` to copy.
+  /// @return True on success, false on failure
+  /// @pre No parameter may be null, else UB!
+  void stdcolt_ext_rt_sany_construct_from_copy(
+      stdcolt_ext_rt_SharedAny* out, const stdcolt_ext_rt_SharedAny* to_copy);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Destroys a `SharedAny` and releases its ownership.
+  /// Decrements the reference count of the underlying shared value referenced by
+  /// `val`. If the reference count reaches zero, the underlying value is freed.
+  /// @param val `SharedAny` to destroy (or null), marked empty afterwards
+  void stdcolt_ext_rt_sany_destroy(stdcolt_ext_rt_SharedAny* val);
+
+  /*****************************/
+  // WEAK ANY
+  /*****************************/
+
+  /// @brief Weak value reference that may be converted to a SharedValue
+  typedef struct
+  {
+    /// @brief Address of the underlying object.
+    /// TODO: investigate immortal objects
+    /// Accessing (read/write) is UB, only use methods!
+    void* address;
+    /// @brief Pointer to control block.
+    /// Accessing (read/write) is UB, only use methods!
+    void* control_block;
+  } stdcolt_ext_rt_WeakAny;
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs a `WeakAny` from a `SharedAny`.
+  /// If an empty `SharedAny` is passed, an empty `WeakAny` is returned.
+  /// @param out The value to initialize
+  /// @param val The `SharedAny` to construct from
+  /// @pre No parameter may be null, else UB!
+  void stdcolt_ext_rt_wany_from_sany(
+      stdcolt_ext_rt_WeakAny* out, const stdcolt_ext_rt_SharedAny* val);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Try to convert a `WeakAny` to a `SharedAny`.
+  /// If the conversion was not possible, `out` is initialized
+  /// as if by `stdcolt_ext_rt_sany_construct_empty`.
+  /// On success, `val` is marked as empty, as if
+  /// by `stdcolt_ext_rt_wany_destroy`.
+  /// @param out The value to initialize
+  /// @param val The `WeakAny` to try to convert to a `SharedAny`
+  /// @return True on success
+  bool stdcolt_ext_rt_wany_try_lock_consume(
+      stdcolt_ext_rt_SharedAny* out, stdcolt_ext_rt_WeakAny* val);
+  
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Try to convert a `WeakAny` to a `SharedAny`.
+  /// If the conversion was not possible, `out` is initialized
+  /// as if by `stdcolt_ext_rt_sany_construct_empty`.
+  /// On success, `val` is still a non-empty `WeakValue` that
+  /// must be passed to `stdcolt_ext_rt_wany_destroy`.
+  /// @param out The value to initialize
+  /// @param val The `WeakAny` to try to convert to a `SharedAny`
+  /// @return True on success
+  bool stdcolt_ext_rt_wany_try_lock(
+      stdcolt_ext_rt_SharedAny* out, const stdcolt_ext_rt_WeakAny* val);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs a `WeakAny` as a copy of another `WeakAny`.
+  /// Creates a new `WeakAny` in `out` that refers to the same `SharedValue` as
+  /// `to_copy`.
+  /// @param out The value to initialize
+  /// @param to_copy The `WeakAny` to copy
+  void stdcolt_ext_rt_wany_construct_from_copy(
+      stdcolt_ext_rt_WeakAny* out, const stdcolt_ext_rt_WeakAny* to_copy);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Destroys a `WeakAny` and releases its ownership.
+  /// @param val `WeakAny` to destroy (or null), marked empty afterwards
+  void stdcolt_ext_rt_wany_destroy(stdcolt_ext_rt_WeakAny* val);
 
 #ifdef __cplusplus
 }
