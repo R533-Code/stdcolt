@@ -10,5 +10,5 @@ void bind_python_bind_runtime_type(nanobind::module_& mod)
   namespace nb = nanobind;
   using namespace stdcolt::ext::rt;
 
-  nb::class_<Value>(mod, "Value");
+  nb::class_<Any>(mod, "Any");
 }
