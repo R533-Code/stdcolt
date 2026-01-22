@@ -418,6 +418,7 @@ namespace stdcolt::ext::rt
       m.name              = {nm.data(), nm.size()};
       m.description       = {doc.data(), doc.size()};
       m.address_or_offset = (uintptr_t)(&method_thunk<PMF>::call);
+      m.kind              = STDCOLT_EXT_RT_MEMBER_FUNCTION;
       m.type              = method_thunk<PMF>::signature(ctx);
       return m;
     }
@@ -444,6 +445,7 @@ namespace stdcolt::ext::rt
       Member m{};
       m.name              = {(const char*)nm.data(), nm.size()};
       m.description       = {(const char*)doc.data(), doc.size()};
+      m.kind              = STDCOLT_EXT_RT_MEMBER_FIELD;
       m.address_or_offset = (uintptr_t)Offset;
       m.type              = type_of<FieldT>(ctx);
       return m;

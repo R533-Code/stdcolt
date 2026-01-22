@@ -20,15 +20,28 @@
 /// @brief C++ wrappers and utilities over the `stdcolt_ext_rt` C API
 namespace stdcolt::ext::rt
 {
+  /// @brief Member kind
+  enum class MemberKind : uint8_t
+  {
+    /// @brief Non-static data field
+    MEMBER_FIELD = STDCOLT_EXT_RT_MEMBER_FIELD,
+    /// @brief Static data field
+    MEMBER_STATIC_FIELD = STDCOLT_EXT_RT_MEMBER_STATIC_FIELD,
+    /// @brief Non-static function (method)
+    MEMBER_FUNCTION = STDCOLT_EXT_RT_MEMBER_FUNCTION,
+  };
+
   /// @brief Reflect member information
   struct ReflectedMember
   {
     /// @brief The name of the member
-    std::span<const char8_t> name;
+    std::u8string_view name;
     /// @brief The description of the member
-    std::span<const char8_t> description;
+    std::u8string_view description;
     /// @brief The type of the member
     Type type;
+    /// @brief The member kind
+    MemberKind kind;
     /// @brief The address or offset of the member
     uintptr_t address_or_offset;
   };
@@ -78,6 +91,7 @@ namespace stdcolt::ext::rt
           {(const char8_t*)member.name.data, member.name.size},
           {(const char8_t*)member.description.data, member.description.size},
           member.type,
+          (MemberKind)member.kind,
           member.address_or_offset};
     }
 
@@ -94,14 +108,14 @@ namespace stdcolt::ext::rt
 
     /// @brief Lookup a member using a function from the C API
     /// @tparam T The type of the member to lookup
-    /// @tparam Self Any or const Any
     /// @tparam LookupFn `stdcolt_ext_rt_lookup_*`
+    /// @tparam KIND The member kind to lookup
+    /// @tparam Self Any or const Any
     /// @param self This
     /// @param member The member name to lookup
     /// @return Pointer with correct const-ness, null on lookup failure
-    template<typename T, auto LookupFn, class Self>
-    static std::conditional_t<std::is_const_v<Self>, const T*, T*> lookup_impl(
-        Self& self, std::u8string_view member) noexcept;
+    template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
+    static auto lookup_impl(Self& self, std::u8string_view member) noexcept;
 
   public:
     /// @brief Constructs an empty value
@@ -243,42 +257,32 @@ namespace stdcolt::ext::rt
     // MEMBER LOOKUPS
     /***************************/
 
-    /// @brief Lookup a member
-    /// @tparam T The type of the member
-    /// @param m The name of the member
-    /// @return Pointer to the member
-    template<typename T>
-    const T* lookup_fast(std::u8string_view m) const noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
-    }
-    /// @brief Lookup a member
-    /// @tparam T The type of the member
-    /// @param m The name of the member
-    /// @return Pointer to the member
-    template<typename T>
-    T* lookup_fast(std::u8string_view m) noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
-    }
-    /// @brief Lookup a member
-    /// @tparam T The type of the member
-    /// @param m The name of the member
-    /// @return Pointer to the member
-    template<typename T>
-    const T* lookup(std::u8string_view m) const noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
-    }
-    /// @brief Lookup a member
-    /// @tparam T The type of the member
-    /// @param m The name of the member
-    /// @return Pointer to the member
-    template<typename T>
-    T* lookup(std::u8string_view m) noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
-    }
+#define __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(KIND, NAME)             \
+  template<typename T>                                                       \
+  const T* NAME##_fast(std::u8string_view m) const noexcept                  \
+  {                                                                          \
+    return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast, KIND>(*this, m); \
+  }                                                                          \
+  template<typename T>                                                       \
+  T* NAME##_fast(std::u8string_view m) noexcept                              \
+  {                                                                          \
+    return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast, KIND>(*this, m); \
+  }                                                                          \
+  template<typename T>                                                       \
+  const T* NAME(std::u8string_view m) const noexcept                         \
+  {                                                                          \
+    return lookup_impl<T, &stdcolt_ext_rt_type_lookup, KIND>(*this, m);      \
+  }                                                                          \
+  template<typename T>                                                       \
+  T* NAME(std::u8string_view m) noexcept                                     \
+  {                                                                          \
+    return lookup_impl<T, &stdcolt_ext_rt_type_lookup, KIND>(*this, m);      \
+  }
+
+    __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
+        STDCOLT_EXT_RT_MEMBER_FIELD, lookup_field)
+    __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
+        STDCOLT_EXT_RT_MEMBER_STATIC_FIELD, lookup_static_field)
 
     /***************************/
     // LIFETIME
@@ -346,9 +350,8 @@ namespace stdcolt::ext::rt
   {
     stdcolt_ext_rt_SharedAny _value{};
 
-    template<typename T, auto LookupFn, class Self>
-    static std::conditional_t<std::is_const_v<Self>, const T*, T*> lookup_impl(
-        Self& self, std::u8string_view member) noexcept;
+    template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
+    static auto lookup_impl(Self& self, std::u8string_view member) noexcept;
 
     friend class WeakAny;
 
@@ -461,26 +464,10 @@ namespace stdcolt::ext::rt
     // MEMBER LOOKUPS
     /***************************/
 
-    template<typename T>
-    const T* lookup_fast(std::u8string_view m) const noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
-    }
-    template<typename T>
-    T* lookup_fast(std::u8string_view m) noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast>(*this, m);
-    }
-    template<typename T>
-    const T* lookup(std::u8string_view m) const noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
-    }
-    template<typename T>
-    T* lookup(std::u8string_view m) noexcept
-    {
-      return lookup_impl<T, &stdcolt_ext_rt_type_lookup>(*this, m);
-    }
+    __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
+        STDCOLT_EXT_RT_MEMBER_FIELD, lookup_field)
+    __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
+        STDCOLT_EXT_RT_MEMBER_STATIC_FIELD, lookup_static_field)
 
     /***************************/
     // REFLECTION API
@@ -751,9 +738,8 @@ namespace stdcolt::ext::rt
     }
   }
 
-  template<typename T, auto LookupFn, class Self>
-  std::conditional_t<std::is_const_v<Self>, const T*, T*> Any::lookup_impl(
-      Self& self, std::u8string_view member) noexcept
+  template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
+  auto Any::lookup_impl(Self& self, std::u8string_view member) noexcept
   {
     if (self.is_empty())
       return nullptr;
@@ -761,20 +747,20 @@ namespace stdcolt::ext::rt
     auto name = stdcolt_ext_rt_StringView{
         reinterpret_cast<const char*>(member.data()), member.size()};
 
-    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()));
+    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()), KIND);
     if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
       return nullptr;
 
-    auto base = static_cast<const char*>(self.base_address());
+    if
+      auto base = static_cast<const char*>(self.base_address());
     auto addr = base + res.data.found.address_or_offset;
 
     using Ptr = std::conditional_t<std::is_const_v<Self>, const T*, T*>;
     return reinterpret_cast<Ptr>(const_cast<char*>(addr));
   }
 
-  template<typename T, auto LookupFn, class Self>
-  std::conditional_t<std::is_const_v<Self>, const T*, T*> SharedAny::lookup_impl(
-      Self& self, std::u8string_view member) noexcept
+  template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
+  auto SharedAny::lookup_impl(Self& self, std::u8string_view member) noexcept
   {
     if (self.is_empty())
       return nullptr;
@@ -782,7 +768,7 @@ namespace stdcolt::ext::rt
     auto name = stdcolt_ext_rt_StringView{
         reinterpret_cast<const char*>(member.data()), member.size()};
 
-    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()));
+    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()), KIND);
     if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
       return nullptr;
 
@@ -793,5 +779,7 @@ namespace stdcolt::ext::rt
     return reinterpret_cast<Ptr>(const_cast<char*>(addr));
   }
 } // namespace stdcolt::ext::rt
+
+#undef __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS
 
 #endif // !__HG_STDCOLT_EXT_RUNTIME_TYPE_CPP_RUNTIME_TYPE
