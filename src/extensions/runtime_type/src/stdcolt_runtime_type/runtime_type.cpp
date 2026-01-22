@@ -19,7 +19,6 @@ using NamedLifetime   = stdcolt_ext_rt_NamedLifetime;
 using Member          = stdcolt_ext_rt_Member;
 using MemberInfo      = stdcolt_ext_rt_MemberInfo;
 using OpaqueTypeID    = stdcolt_ext_rt_OpaqueTypeID;
-using PreparedMember  = stdcolt_ext_rt_PreparedMember;
 using Value           = stdcolt_ext_rt_Any;
 using NamedTypeVTable = stdcolt_ext_rt_NamedTypeVTable;
 
@@ -161,8 +160,9 @@ struct RTMemberDescription
 struct NamedTypeVTableEntry
 {
   uintptr_t address_or_offset;
-  uint64_t tag; // hash(name) for fast checks
-  Type type;    // exact type pointer for safety
+  uint64_t tag;                   // hash(name) for fast checks
+  Type type;                      // exact type pointer for safety
+  stdcolt_ext_rt_MemberKind kind; // exact kind
   RTMemberDescription* true_description;
 };
 
@@ -294,6 +294,14 @@ static inline ResultLookup lookup_mismatch(Type actual) noexcept
   ResultLookup r{};
   r.result                         = STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE;
   r.data.mismatch_type.actual_type = actual;
+  return r;
+}
+
+static inline ResultLookup lookup_mismatch_kind(stdcolt_ext_rt_MemberKind k) noexcept
+{
+  ResultLookup r{};
+  r.result                  = STDCOLT_EXT_RT_LOOKUP_MISMATCH_KIND;
+  r.data.mismatch_kind.kind = k;
   return r;
 }
 
@@ -764,6 +772,8 @@ extern "C" ResultType stdcolt_ext_rt_type_create(
   {
     if (!members[i].type)
       return result_type_invalid_param();
+    if (members[i].kind >= STDCOLT_EXT_RT_MEMBER_end)
+      return result_type_invalid_param();
     if (members[i].type->owner != ctx)
       return result_type_invalid_owner();
   }
@@ -965,6 +975,7 @@ extern "C" ResultType stdcolt_ext_rt_type_create(
 
     entries[i].address_or_offset = m.address_or_offset;
     entries[i].type              = m.type;
+    entries[i].kind              = m.kind;
     entries[i].true_description  = d;
     entries[i].tag = hash_name({(const char8_t*)m.name.data, m.name.size});
   }
@@ -974,6 +985,7 @@ extern "C" ResultType stdcolt_ext_rt_type_create(
   // set last entry to sentinel null value (for iterators)
   entries[n].type              = nullptr;
   entries[n].tag               = 0;
+  entries[n].kind              = STDCOLT_EXT_RT_MEMBER_end;
   entries[n].address_or_offset = 0;
   entries[n].true_description  = nullptr;
 
@@ -1207,6 +1219,7 @@ void rt_type_create_runtime_as_declared(
     lt.add(member.type);
     // populate common data
     out_member.name        = member.name;
+    out_member.kind        = STDCOLT_EXT_RT_MEMBER_FIELD;
     out_member.description = member.description;
     out_member.type        = member.type;
 
@@ -1309,6 +1322,7 @@ bool rt_type_create_runtime_optimize_size_fast(
       out_member.name        = member.name;
       out_member.description = member.description;
       out_member.type        = member.type;
+      out_member.kind        = STDCOLT_EXT_RT_MEMBER_FIELD;
 
       // to compute trivialness
       lt.add(member.type);
@@ -1393,7 +1407,8 @@ static inline bool name_equals(
 }
 
 extern "C" ResultLookup stdcolt_ext_rt_type_lookup_fast(
-    Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v, Type expected_type)
+    Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v, Type expected_type,
+    stdcolt_ext_rt_MemberKind expected_kind)
 {
   std::span<const char8_t> name = {(const char8_t*)name_v->data, name_v->size};
 
@@ -1411,18 +1426,21 @@ extern "C" ResultLookup stdcolt_ext_rt_type_lookup_fast(
   const auto entries            = vt->entries();
   const NamedTypeVTableEntry& e = entries[idx];
 
+  if (e.kind != expected_kind) [[unlikely]]
+    return lookup_mismatch_kind(e.kind);
   // type safety is guaranteed by Type pointer equality
-  if (e.type != expected_type)
+  if (e.type != expected_type) [[unlikely]]
     return lookup_mismatch(e.type);
 
-  if (const uint64_t t = hash_name(name); e.tag != t)
+  if (const uint64_t t = hash_name(name); e.tag != t) [[unlikely]]
     return lookup_not_found();
 
   return lookup_found(e.address_or_offset);
 }
 
 extern "C" ResultLookup stdcolt_ext_rt_type_lookup(
-    Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v, Type expected_type)
+    Type type_to_lookup, const stdcolt_ext_rt_StringView* name_v, Type expected_type,
+    stdcolt_ext_rt_MemberKind expected_kind)
 {
   std::span<const char8_t> name = {(const char8_t*)name_v->data, name_v->size};
   if (!type_to_lookup || type_to_lookup->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
@@ -1440,14 +1458,13 @@ extern "C" ResultLookup stdcolt_ext_rt_type_lookup(
   const auto entries            = vt->entries();
   const NamedTypeVTableEntry& e = entries[idx];
 
-  if (e.type != expected_type)
+  if (e.kind != expected_kind) [[unlikely]]
+    return lookup_mismatch_kind(e.kind);
+  if (e.type != expected_type) [[unlikely]]
     return lookup_mismatch(e.type);
 
   const RTMemberDescription* d = e.true_description;
-  if (!d)
-    return lookup_not_found();
-
-  if (!name_equals(name, d->key_c_str(), d->key_size))
+  if (!name_equals(name, d->key_c_str(), d->key_size)) [[unlikely]]
     return lookup_not_found();
 
   return lookup_found(e.address_or_offset);
@@ -1482,59 +1499,6 @@ extern "C" Type stdcolt_ext_rt_register_get_type(
   return it->second;
 }
 
-static inline PreparedMember pm_invalid() noexcept
-{
-  return PreparedMember{nullptr, nullptr, 0, 0};
-}
-
-extern "C" PreparedMember stdcolt_ext_rt_prepare_member(
-    Type owner_named, const stdcolt_ext_rt_StringView* member_name_v,
-    Type expected_type)
-{
-  PreparedMember pm{};
-  std::span<const char8_t> member_name = {
-      (const char8_t*)member_name_v->data, member_name_v->size};
-
-  if (!owner_named || owner_named->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
-    return pm_invalid();
-
-  const NamedTypeVTable* vt = owner_named->info.kind_named.vtable;
-  if (!vt || vt->count_members == 0 || !vt->phf.phf_lookup)
-    return pm_invalid();
-
-  const Key k{(const void*)member_name.data(), (uint32_t)member_name.size()};
-  const uint64_t id = vt->phf.phf_lookup(vt->phf.state, &k);
-
-  STDCOLT_debug_assert(id < vt->count_members, "invalid return from PHF");
-
-  pm.owner    = owner_named;
-  pm.expected = expected_type;
-  pm.tag1     = id;
-  pm.tag2     = hash_name(member_name);
-  return pm;
-}
-
-extern "C" ResultLookup stdcolt_ext_rt_resolve_prepared_member(
-    const PreparedMember* pm_v)
-{
-  const PreparedMember& pm = *pm_v;
-  if (!pm.owner || pm.owner->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
-    return lookup_expected_named();
-
-  const NamedTypeVTable* vt = pm.owner->info.kind_named.vtable;
-  if (pm.tag1 >= vt->count_members)
-    return lookup_not_found();
-
-  const auto entries            = vt->entries();
-  const NamedTypeVTableEntry& e = entries[pm.tag1];
-
-  if (e.type != pm.expected)
-    return lookup_mismatch(e.type);
-  if (e.tag != pm.tag2)
-    return lookup_not_found();
-  return lookup_found(e.address_or_offset);
-}
-
 extern "C" stdcolt_ext_rt_StringView stdcolt_ext_rt_reflect_name(
     stdcolt_ext_rt_Type type)
 {
@@ -1565,6 +1529,7 @@ extern "C" stdcolt_ext_rt_Member stdcolt_ext_rt_reflect_read(
 
   ret.name              = {(const char*)name.data(), name.size()};
   ret.description       = {(const char*)desc.data(), desc.size()};
+  ret.kind              = entry->kind;
   ret.type              = entry->type;
   ret.address_or_offset = entry->address_or_offset;
   return ret;
