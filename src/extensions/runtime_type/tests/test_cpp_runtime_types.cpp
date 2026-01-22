@@ -125,7 +125,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(ptr->c == 3);
     REQUIRE(ptr->d == 4);
 
-    auto a_ptr = val.lookup<uint8_t>(u8"a");
+    auto a_ptr = val.lookup_field<uint8_t>(u8"a");
     REQUIRE(a_ptr != nullptr);
     REQUIRE(*a_ptr == 1);
     *a_ptr = 10;
@@ -136,7 +136,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(span.size() == 1);
     REQUIRE(span[0].a == 10);
 
-    for (auto [name, desc, type, _] : val.reflect())
+    for (auto [name, desc, type, kind, _] : val.reflect())
     {
       REQUIRE(name.size() == 1);
       REQUIRE(type->kind == STDCOLT_EXT_RT_TYPE_KIND_BUILTIN);
@@ -319,7 +319,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
     REQUIRE(ptr->d == 4);
 
     // member lookup through wrapper
-    auto a_ptr = s.lookup<uint8_t>(u8"a");
+    auto a_ptr = s.lookup_field<uint8_t>(u8"a");
     REQUIRE(a_ptr != nullptr);
     REQUIRE(*a_ptr == 1);
     *a_ptr = 10;

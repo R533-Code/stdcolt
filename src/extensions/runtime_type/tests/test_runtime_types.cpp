@@ -68,7 +68,7 @@ static stdcolt_ext_rt_ResultLookup lookup_found(
     stdcolt_ext_rt_Type ty, std::string_view name, stdcolt_ext_rt_Type expected)
 {
   auto n = sv(name);
-  auto r = stdcolt_ext_rt_type_lookup(ty, &n, expected);
+  auto r = stdcolt_ext_rt_type_lookup(ty, &n, expected, STDCOLT_EXT_RT_MEMBER_FIELD);
   REQUIRE(r.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
   return r;
 }
@@ -428,10 +428,13 @@ TEST_CASE("stdcolt/extensions/runtime_type: named type exposes members and metho
 
   // Create Foo named type with realized members
   stdcolt_ext_rt_Member mems[] = {
-      {sv("x"), sv("field"), t_int, (uintptr_t)offsetof(Foo, x)},
+      {sv("x"), sv("field"), t_int, STDCOLT_EXT_RT_MEMBER_FIELD,
+       (uintptr_t)offsetof(Foo, x)},
       {sv("add_ref"), sv("method"), add_fn.data.success.type,
+       STDCOLT_EXT_RT_MEMBER_FIELD,
        (uintptr_t)reinterpret_cast<void*>(&Foo_add_ref_thunk)},
       {sv("getx"), sv("const method"), getx_fn.data.success.type,
+       STDCOLT_EXT_RT_MEMBER_FIELD,
        (uintptr_t)reinterpret_cast<void*>(&Foo_getx_thunk)},
   };
   stdcolt_ext_rt_MemberView mv{mems, 3};
@@ -483,7 +486,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: named type exposes members and metho
     REQUIRE(wrong.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
     auto n = sv("x");
-    auto r = stdcolt_ext_rt_type_lookup(ty, &n, wrong.data.success.type);
+    auto r = stdcolt_ext_rt_type_lookup(
+        ty, &n, wrong.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD);
     REQUIRE(r.result == STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE);
     CHECK(mismatch_actual(r) == t_int);
   }
@@ -521,7 +525,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: type_create_runtime optimize-size-fa
 
     for (const auto& m : mems)
     {
-      auto r = stdcolt_ext_rt_type_lookup(opt, &m.name, m.type);
+      auto r = stdcolt_ext_rt_type_lookup(
+          opt, &m.name, m.type, STDCOLT_EXT_RT_MEMBER_FIELD);
       REQUIRE(r.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
 
       const uint32_t a = (uint32_t)m.type->type_align;
@@ -568,7 +573,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: type_create_runtime optimize-size-fa
       CHECK(t.data.success.type->type_size == u64.data.success.type->type_size);
 
       auto n = sv("e");
-      auto r = stdcolt_ext_rt_type_lookup(t.data.success.type, &n, mems1[0].type);
+      auto r = stdcolt_ext_rt_type_lookup(
+          t.data.success.type, &n, mems1[0].type, STDCOLT_EXT_RT_MEMBER_FIELD);
       REQUIRE(r.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
       CHECK(found_addr(r) == 0);
     }
@@ -642,7 +648,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: type_create duplicate name -> "
   REQUIRE(i32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
   stdcolt_ext_rt_Member mems[] = {
-      {sv("x"), sv(""), i32.data.success.type, (uintptr_t)offsetof(Foo, x)},
+      {sv("x"), sv(""), i32.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD,
+       (uintptr_t)offsetof(Foo, x)},
   };
   stdcolt_ext_rt_MemberView mv{mems, 1};
   auto lt = trivially_copyable_lifetime();
@@ -669,7 +676,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: lookup_fast vs lookup + prepared mem
   REQUIRE(i32.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
   stdcolt_ext_rt_Member mems[] = {
-      {sv("x"), sv(""), i32.data.success.type, (uintptr_t)offsetof(Foo, x)},
+      {sv("x"), sv(""), i32.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD,
+       (uintptr_t)offsetof(Foo, x)},
   };
   stdcolt_ext_rt_MemberView mv{mems, 1};
   auto lt = trivially_copyable_lifetime();
@@ -682,27 +690,26 @@ TEST_CASE("stdcolt/extensions/runtime_type: lookup_fast vs lookup + prepared mem
 
   auto name_x = sv("x");
 
-  auto r1 = stdcolt_ext_rt_type_lookup(ty, &name_x, i32.data.success.type);
+  auto r1 = stdcolt_ext_rt_type_lookup(
+      ty, &name_x, i32.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD);
   REQUIRE(r1.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
 
-  auto r2 = stdcolt_ext_rt_type_lookup_fast(ty, &name_x, i32.data.success.type);
+  auto r2 = stdcolt_ext_rt_type_lookup_fast(
+      ty, &name_x, i32.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD);
   REQUIRE(r2.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
   CHECK(found_addr(r2) == found_addr(r1));
-
-  auto pm = stdcolt_ext_rt_prepare_member(ty, &name_x, i32.data.success.type);
-  auto r3 = stdcolt_ext_rt_resolve_prepared_member(&pm);
-  REQUIRE(r3.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
-  CHECK(found_addr(r3) == found_addr(r1));
 
   auto i64 =
       stdcolt_ext_rt_type_create_builtin(ctx, STDCOLT_EXT_RT_BUILTIN_TYPE_I64);
   REQUIRE(i64.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
-  auto bad = stdcolt_ext_rt_type_lookup_fast(ty, &name_x, i64.data.success.type);
+  auto bad = stdcolt_ext_rt_type_lookup_fast(
+      ty, &name_x, i64.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD);
   CHECK(bad.result == STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE);
 
   auto name_nope = sv("nope");
-  auto nf        = stdcolt_ext_rt_type_lookup(ty, &name_nope, i32.data.success.type);
+  auto nf        = stdcolt_ext_rt_type_lookup(
+      ty, &name_nope, i32.data.success.type, STDCOLT_EXT_RT_MEMBER_FIELD);
   CHECK(nf.result == STDCOLT_EXT_RT_LOOKUP_NOT_FOUND);
 
   stdcolt_ext_rt_destroy(ctx);
@@ -823,8 +830,9 @@ TEST_CASE("stdcolt/extensions/runtime_type: Runtime type lifetime recursion: "
   stdcolt_ext_rt_Any v{};
   REQUIRE(stdcolt_ext_rt_any_init(&v, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
-  auto nm  = sv("m");
-  auto off = stdcolt_ext_rt_type_lookup(t_outer, &nm, t_dt);
+  auto nm = sv("m");
+  auto off =
+      stdcolt_ext_rt_type_lookup(t_outer, &nm, t_dt, STDCOLT_EXT_RT_MEMBER_FIELD);
   REQUIRE(off.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
 
   void* member_addr = (uint8_t*)v.header.address + found_addr(off);
@@ -882,10 +890,12 @@ TEST_CASE("stdcolt/extensions/runtime_type: Copy rollback destroys already-copie
   stdcolt_ext_rt_Any src{};
   REQUIRE(stdcolt_ext_rt_any_init(&src, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
-  auto na    = sv("a");
-  auto nb    = sv("b");
-  auto off_a = stdcolt_ext_rt_type_lookup(t_outer, &na, t_dt);
-  auto off_b = stdcolt_ext_rt_type_lookup(t_outer, &nb, t_fail);
+  auto na = sv("a");
+  auto nb = sv("b");
+  auto off_a =
+      stdcolt_ext_rt_type_lookup(t_outer, &na, t_dt, STDCOLT_EXT_RT_MEMBER_FIELD);
+  auto off_b =
+      stdcolt_ext_rt_type_lookup(t_outer, &nb, t_fail, STDCOLT_EXT_RT_MEMBER_FIELD);
   REQUIRE(off_a.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
   REQUIRE(off_b.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
 
@@ -1022,10 +1032,12 @@ TEST_CASE("stdcolt/extensions/runtime_type: lookup on non-named types returns "
 
   for (auto* t : ts)
   {
-    auto r = stdcolt_ext_rt_type_lookup(t, &name_x, expected);
+    auto r = stdcolt_ext_rt_type_lookup(
+        t, &name_x, expected, STDCOLT_EXT_RT_MEMBER_FIELD);
     CHECK(r.result == STDCOLT_EXT_RT_LOOKUP_EXPECTED_NAMED);
 
-    auto rf = stdcolt_ext_rt_type_lookup_fast(t, &name_x, expected);
+    auto rf = stdcolt_ext_rt_type_lookup_fast(
+        t, &name_x, expected, STDCOLT_EXT_RT_MEMBER_FIELD);
     CHECK(rf.result == STDCOLT_EXT_RT_LOOKUP_EXPECTED_NAMED);
   }
 
@@ -1301,20 +1313,24 @@ TEST_CASE("stdcolt/extensions/runtime_type: any_construct_from_copy success + de
     stdcolt_ext_rt_Any src{};
     REQUIRE(stdcolt_ext_rt_any_init(&src, t_outer) == STDCOLT_EXT_RT_VALUE_SUCCESS);
 
-    auto na    = sv("a");
-    auto ni    = sv("i");
-    auto off_a = stdcolt_ext_rt_type_lookup(t_outer, &na, t_dt);
-    auto off_i = stdcolt_ext_rt_type_lookup(t_outer, &ni, t_inner);
+    auto na = sv("a");
+    auto ni = sv("i");
+    auto off_a =
+        stdcolt_ext_rt_type_lookup(t_outer, &na, t_dt, STDCOLT_EXT_RT_MEMBER_FIELD);
+    auto off_i = stdcolt_ext_rt_type_lookup(
+        t_outer, &ni, t_inner, STDCOLT_EXT_RT_MEMBER_FIELD);
     REQUIRE(off_a.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
     REQUIRE(off_i.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
 
     void* a_addr = (uint8_t*)src.header.address + found_addr(off_a);
     void* i_addr = (uint8_t*)src.header.address + found_addr(off_i);
 
-    auto nb    = sv("b");
-    auto nc    = sv("c");
-    auto off_b = stdcolt_ext_rt_type_lookup(t_inner, &nb, t_dt);
-    auto off_c = stdcolt_ext_rt_type_lookup(t_inner, &nc, t_fail);
+    auto nb = sv("b");
+    auto nc = sv("c");
+    auto off_b =
+        stdcolt_ext_rt_type_lookup(t_inner, &nb, t_dt, STDCOLT_EXT_RT_MEMBER_FIELD);
+    auto off_c = stdcolt_ext_rt_type_lookup(
+        t_inner, &nc, t_fail, STDCOLT_EXT_RT_MEMBER_FIELD);
     REQUIRE(off_b.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
     REQUIRE(off_c.result == STDCOLT_EXT_RT_LOOKUP_FOUND);
 
