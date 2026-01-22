@@ -220,6 +220,19 @@ extern "C"
     uint64_t size;
   } stdcolt_ext_rt_StringView;
 
+  enum
+  {
+    /// @brief Represents a byte offset from the start of the object
+    STDCOLT_EXT_RT_MEMBER_FIELD,
+    /// @brief Represents a function address
+    STDCOLT_EXT_RT_MEMBER_FUNCTION,
+    /// @brief Represents static data address
+    STDCOLT_EXT_RT_MEMBER_STATIC_FIELD,
+
+    STDCOLT_EXT_RT_MEMBER_end
+  };
+  typedef uint8_t stdcolt_ext_rt_MemberKind;
+
   /// @brief A member, used for `rt_type_create`.
   /// The difference between `Member` and `MemberInfo` is that
   /// a `Member` is realized: it has an offset/address.
@@ -231,6 +244,8 @@ extern "C"
     stdcolt_ext_rt_StringView description;
     /// @brief The type of the member
     stdcolt_ext_rt_Type type;
+    /// @brief The member kind
+    stdcolt_ext_rt_MemberKind kind;
     /// @brief The function address or offset to the member
     uintptr_t address_or_offset;
   } stdcolt_ext_rt_Member;
@@ -420,6 +435,10 @@ extern "C"
     /// The name of the member exist but has another type. The type is stored
     /// in `mismatch_type`.
     STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE,
+    /// @brief The lookup was not successful, the member did not have the kind requested.
+    /// The name of the member exist but has another kind. The kind is stored
+    /// in `mismatch_kind`.
+    STDCOLT_EXT_RT_LOOKUP_MISMATCH_KIND,
     /// @brief The lookup was not successful, the type in which to lookup is not named.
     STDCOLT_EXT_RT_LOOKUP_EXPECTED_NAMED,
     /// @brief The lookup was not successful, the type does not provide such a member.
@@ -443,12 +462,19 @@ extern "C"
         uintptr_t address_or_offset;
       } found;
 
-      /// @brief Only active if `result == STDCOLT_EXT_RT_MISMATCH_TYPE`.
+      /// @brief Only active if `result == STDCOLT_EXT_RT_LOOKUP_MISMATCH_TYPE`.
       struct
       {
         /// @brief The actual type of the member
         stdcolt_ext_rt_Type actual_type;
       } mismatch_type;
+
+      /// @brief Only active if `result == STDCOLT_EXT_RT_LOOKUP_MISMATCH_KIND`.
+      struct
+      {
+        /// @brief The actual member kind
+        stdcolt_ext_rt_MemberKind kind;
+      } mismatch_kind;
     } data;
   } stdcolt_ext_rt_ResultLookup;
 
@@ -546,10 +572,11 @@ extern "C"
   /// @param type_to_lookup The type in which to do the lookup
   /// @param name The name of the type (exact same bytes as the one used in `rt_type_create`)
   /// @param expected_type The expected type of the member
-  /// @return LookupResult
+  /// @param expected_kind The expected kind of the member
+  /// @return ResultLookup
   stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_type_lookup_fast(
       stdcolt_ext_rt_Type type_to_lookup, const stdcolt_ext_rt_StringView* name,
-      stdcolt_ext_rt_Type expected_type);
+      stdcolt_ext_rt_Type expected_type, stdcolt_ext_rt_MemberKind expected_kind);
 
   STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Does a lookup for a member.
@@ -558,10 +585,11 @@ extern "C"
   /// @param type_to_lookup The type in which to do the lookup
   /// @param name The name of the type (exact same bytes as the one used in `rt_type_create`)
   /// @param expected_type The expected type of the member
-  /// @return LookupResult
+  /// @param expected_kind The expected kind of the member
+  /// @return ResultLookup
   stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_type_lookup(
       stdcolt_ext_rt_Type type_to_lookup, const stdcolt_ext_rt_StringView* name,
-      stdcolt_ext_rt_Type expected_type);
+      stdcolt_ext_rt_Type expected_type, stdcolt_ext_rt_MemberKind expected_kind);
 
   /*****************************/
   // REFLECTION
@@ -660,6 +688,13 @@ extern "C"
   /// @brief An opaque type ID, that may be mapped to a `Type`
   typedef const void* stdcolt_ext_rt_OpaqueTypeID;
 
+  // TODO:
+  // to support correct type registration across DLLs,
+  // types must be also bound in each DLLs, and layout tags
+  // must be computed. ABI errors could be generated if
+  // different DLLs are binding the same type but the type
+  // actually differ.
+
   STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Registers a type for a specific opaque type ID
   /// @param ctx The context in which to register
@@ -677,46 +712,6 @@ extern "C"
   /// @return The registered type or nullptr
   stdcolt_ext_rt_Type stdcolt_ext_rt_register_get_type(
       stdcolt_ext_rt_RuntimeContext* ctx, stdcolt_ext_rt_OpaqueTypeID id);
-
-  /*****************************/
-  // PREPARED MEMBER
-  /*****************************/
-
-  /// @brief PreparedMember, obtained through `rt_prepare_member`.
-  /// A prepared member allows even faster lookups than `rt_type_lookup_fast`,
-  /// with the same guarantees (so false positives are possible).
-  /// When accessing the same member multiple times, either cache the obtained
-  /// pointer (this is the fastest), or create and reuse a `PreparedMember`.
-  /// A prepared member is valid for the lifetime of the type it was prepared for.
-  typedef struct
-  {
-    /// @brief The type whose member to access
-    stdcolt_ext_rt_Type owner;
-    /// @brief Expected member type
-    stdcolt_ext_rt_Type expected;
-    /// @brief Index of member (internal tag, do not modify!)
-    uint64_t tag1;
-    /// @brief Hash of member (internal tag, do not modify!)
-    uint64_t tag2;
-  } stdcolt_ext_rt_PreparedMember;
-
-  STDCOLT_RUNTIME_TYPE_EXPORT
-  /// @brief Creates a prepared member for faster repeated accesses to the same member.
-  /// A prepared member allows faster lookups: use `rt_resolve_prepared_member`.
-  /// @param owner_named The type in which to do the lookups
-  /// @param member_name The member name to lookup (exact same bytes as the one used in `rt_type_create`)
-  /// @param expected_type The expected type of the member
-  /// @return PreparedMember
-  stdcolt_ext_rt_PreparedMember stdcolt_ext_rt_prepare_member(
-      stdcolt_ext_rt_Type owner_named, const stdcolt_ext_rt_StringView* member_name,
-      stdcolt_ext_rt_Type expected_type);
-
-  STDCOLT_RUNTIME_TYPE_EXPORT
-  /// @brief Resolves a lookup from a prepared member
-  /// @param pm The prepared member, obtained from `rt_prepare_member`.
-  /// @return LookupResult
-  stdcolt_ext_rt_ResultLookup stdcolt_ext_rt_resolve_prepared_member(
-      const stdcolt_ext_rt_PreparedMember* pm);
 
   /*****************************/
   // UNIQUE ANY
@@ -833,6 +828,8 @@ extern "C"
     void* control_block;
   } stdcolt_ext_rt_SharedAny;
 
+  // TODO: add type to support aliasing constructor
+
   STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Initialize the storage of a `SharedAny` for a specific type.
   /// This function does not initialize the stored value: this is not
@@ -879,8 +876,9 @@ extern "C"
   /// @brief Weak value reference that may be converted to a SharedValue
   typedef struct
   {
+    // TODO: investigate immortal objects
+    // TODO: add type to support aliasing constructor
     /// @brief Address of the underlying object.
-    /// TODO: investigate immortal objects
     /// Accessing (read/write) is UB, only use methods!
     void* address;
     /// @brief Pointer to control block.
@@ -908,7 +906,7 @@ extern "C"
   /// @return True on success
   bool stdcolt_ext_rt_wany_try_lock_consume(
       stdcolt_ext_rt_SharedAny* out, stdcolt_ext_rt_WeakAny* val);
-  
+
   STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Try to convert a `WeakAny` to a `SharedAny`.
   /// If the conversion was not possible, `out` is initialized
