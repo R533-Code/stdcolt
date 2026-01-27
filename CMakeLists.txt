@@ -36,7 +36,7 @@ add_subdirectory("3rd_party/ECMake")
 
 option(STDCOLT_BUILD_DOC
     "Build the stdcolt documentation"
-    ON
+    ${PROJECT_IS_TOP_LEVEL}
 )
 option(STDCOLT_BUILD_PYTHON_BINDINGS
     "Set to true to build python bindings of the C++ code"
@@ -121,7 +121,7 @@ if(STDCOLT_BUILD_DOC)
         # request to configure the file
         configure_file(${DOXYGEN_IN} ${DOXYGEN_OUT})
 
-        add_custom_target(GENERATE_DOCS
+        add_custom_target(GENERATE_DOCS_STDCOLT
             COMMAND ${DOXYGEN_EXECUTABLE} ${DOXYGEN_OUT}
             WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
             COMMENT "Generating API documentation with Doxygen"
