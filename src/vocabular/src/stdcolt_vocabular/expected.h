@@ -19,7 +19,7 @@ namespace stdcolt
   };
 
   /// @brief Tag object for constructing errors in Expected
-  inline constexpr unexpected_t unexpected;
+  inline constexpr unexpected_t Unexpected;
 
   /// @brief Tag struct for constructing an object in place
   struct in_place_t
@@ -27,7 +27,7 @@ namespace stdcolt
   };
 
   /// @brief Tag object for constructing an object in place
-  inline constexpr in_place_t in_place;
+  inline constexpr in_place_t InPlace;
 
   /// @brief A helper class that can hold either a value or an error.
   /// Example Usage:
@@ -36,7 +36,7 @@ namespace stdcolt
   /// {
   ///   if (b != 0)
   ///     return a / b;
-  ///   return { unexpected, "Division by zero is prohibited!" };
+  ///   return { Unexpected, "Division by zero is prohibited!" };
   /// }
   /// @endcode
   /// @tparam ExpectedTy The expected type
@@ -403,7 +403,7 @@ namespace stdcolt
           "Function must have the error type as argument!");
       using G = std::remove_cvref_t<std::invoke_result_t<Fn, decltype(error())>>;
       if (is_expect())
-        return G(in_place, **this);
+        return G(InPlace, **this);
       return std::invoke(std::forward<Fn>(f), error());
     }
 
@@ -416,7 +416,7 @@ namespace stdcolt
           "Function must have the error type as argument!");
       using G = std::remove_cvref_t<std::invoke_result_t<Fn, decltype(error())>>;
       if (is_expect())
-        return G(in_place, **this);
+        return G(InPlace, **this);
       return std::invoke(std::forward<Fn>(f), error());
     }
     template<typename Fn>
@@ -429,7 +429,7 @@ namespace stdcolt
       using G = std::remove_cvref_t<
           std::invoke_result_t<Fn, decltype(std::move(error()))>>;
       if (is_expect())
-        return G(in_place, std::move(**this));
+        return G(InPlace, std::move(**this));
       return std::invoke(std::forward<Fn>(f), std::move(error()));
     }
 
@@ -443,7 +443,7 @@ namespace stdcolt
       using G = std::remove_cvref_t<
           std::invoke_result_t<Fn, decltype(std::move(error()))>>;
       if (is_expect())
-        return G(in_place, std::move(**this));
+        return G(InPlace, std::move(**this));
       return std::invoke(std::forward<Fn>(f), std::move(error()));
     }
 
@@ -460,7 +460,7 @@ namespace stdcolt
       using U = std::remove_cvref_t<std::invoke_result_t<F, decltype(**this)>>;
       if (is_expect())
         return std::invoke(std::forward<F>(f), **this);
-      return U(unexpected, error());
+      return U(Unexpected, error());
     }
 
     template<typename F>
@@ -472,7 +472,7 @@ namespace stdcolt
       using U = std::remove_cvref_t<std::invoke_result_t<F, decltype(**this)>>;
       if (is_expect())
         return std::invoke(std::forward<F>(f), **this);
-      return U(unexpected, error());
+      return U(Unexpected, error());
     }
 
     template<typename F>
@@ -485,7 +485,7 @@ namespace stdcolt
           std::remove_cvref_t<std::invoke_result_t<F, decltype(std::move(**this))>>;
       if (is_expect())
         return std::invoke(std::forward<F>(f), std::move(**this));
-      return U(unexpected, std::move(error()));
+      return U(Unexpected, std::move(error()));
     }
 
     template<typename F>
@@ -498,7 +498,7 @@ namespace stdcolt
           std::remove_cvref_t<std::invoke_result_t<F, decltype(std::move(**this))>>;
       if (is_expect())
         return std::invoke(std::forward<F>(f), std::move(**this));
-      return U(unexpected, std::move(error()));
+      return U(Unexpected, std::move(error()));
     }
 
     /********************************/
@@ -514,7 +514,7 @@ namespace stdcolt
       using U = std::remove_cvref_t<std::invoke_result_t<F, decltype(**this)>>;
       if (is_expect())
         return Expected<U, ErrorTy>(std::invoke(std::forward<F>(f), **this));
-      return Expected<U, ErrorTy>(unexpected, error());
+      return Expected<U, ErrorTy>(Unexpected, error());
     }
 
     template<typename F>
@@ -526,7 +526,7 @@ namespace stdcolt
       using U = std::remove_cvref_t<std::invoke_result_t<F, decltype(**this)>>;
       if (is_expect())
         return Expected<U, ErrorTy>(std::invoke(std::forward<F>(f), **this));
-      return Expected<U, ErrorTy>(unexpected, error());
+      return Expected<U, ErrorTy>(Unexpected, error());
     }
 
     template<typename F>
@@ -540,7 +540,7 @@ namespace stdcolt
       if (is_expect())
         return Expected<U, ErrorTy>(
             std::invoke(std::forward<F>(f), std::move(**this)));
-      return Expected<U, ErrorTy>(unexpected, std::move(error()));
+      return Expected<U, ErrorTy>(Unexpected, std::move(error()));
     }
 
     template<typename F>
@@ -554,7 +554,7 @@ namespace stdcolt
       if (is_expect())
         return Expected<U, ErrorTy>(
             std::invoke(std::forward<F>(f), std::move(**this)));
-      return Expected<U, ErrorTy>(unexpected, std::move(error()));
+      return Expected<U, ErrorTy>(Unexpected, std::move(error()));
     }
 
     /********************************/
@@ -606,7 +606,7 @@ namespace stdcolt
         std::abort();
       }
       else
-        return expected;
+        return std::move(expected);
     }
     /// @brief Returns the expected value, or aborts if it does not exist.
     /// @param on_abort The function to call before aborting or null
