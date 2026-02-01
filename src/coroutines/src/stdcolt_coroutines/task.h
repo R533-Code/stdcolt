@@ -81,6 +81,8 @@ namespace stdcolt::coroutines
     /// @brief Destructor, destroys the value if there is one
     ~generic_task_promise()
     {
+      using std::exception_ptr;
+
       if (state == StorageState::VALUE)
         get_value().~T();
       else if (state == StorageState::EXCEPT)
@@ -112,7 +114,7 @@ namespace stdcolt::coroutines
     /// @tparam U The type from which to convert
     /// @param value The value to return
     template<std::convertible_to<T> U>
-    void return_value(U&& value) noexcept(std::is_nothrow_constructible_v<T, U&&>)
+    void return_value(U&& value) noexcept
     {
       STDCOLT_debug_assert(state == StorageState::EMPTY, "Task must be empty");
       // as Task must only co_return, not co_yield ^^^
