@@ -118,7 +118,12 @@ namespace stdcolt::coroutines
         Executor* ex;
         PostStatus status{};
         bool await_ready() const noexcept { return false; }
-        void await_suspend(handle h) noexcept { status = ex->post(h); }
+        bool await_suspend(handle h) noexcept
+        {
+          status = ex->post(h);
+          // If posting failed, do NOT suspend, continue running inline.
+          return status == PostStatus::POST_SUCCESS;
+        }
         PostStatus await_resume() const noexcept { return status; }
       };
       return awaiter{this};
@@ -238,51 +243,23 @@ namespace stdcolt::coroutines
     void spawn(Awaitable&& aw)
     {
       _pending.fetch_add(1, std::memory_order_relaxed);
-      // create a detached coroutine bound to this scope
-      auto dt = make_detached(*this, std::forward<Awaitable>(aw));
-
-      // detach: the coroutine will self-destroy in final_suspend().
-      // setting handle = nullptr ensures detached_task's destructor does nothing.
-      dt.handle = nullptr;
-    }
-
-    /// @brief Awaitable to efficiently waits for all the spawned tasks to be done.
-    /// For non-coroutine code use `wait_fence`.
-    /// @return Awaitable
-    auto wait_idle() noexcept
-    {
-      struct awaiter
+      try
       {
-        AsyncScope* scope;
+        // TODO: handle exceptions...
+        // create a detached coroutine bound to this scope
+        auto dt = make_detached(*this, std::forward<Awaitable>(aw));
 
-        bool await_ready() const noexcept
-        {
-          // if everything already finished, resume immediately
-          return scope->_pending.load(std::memory_order_acquire) == 0;
-        }
-        bool await_suspend(std::coroutine_handle<> h) noexcept
-        {
-          scope->_waiter.store(h, std::memory_order_release);
-
-          // if everything already finished, resume immediately
-          if (scope->_pending.load(std::memory_order_acquire) == 0)
-          {
-            auto old = scope->_waiter.exchange(
-                std::coroutine_handle<>{}, std::memory_order_acq_rel);
-            if (old)
-              old.resume();
-            return false;
-          }
-          return true;
-        }
-        void await_resume() const noexcept {}
-      };
-
-      return awaiter{this};
+        // detach: the coroutine will self-destroy in final_suspend().
+        // setting handle = nullptr ensures detached_task's destructor does nothing.
+        dt.handle = nullptr;
+      }
+      catch (...)
+      {
+        on_task_done(); // decrements + notifies
+      }
     }
 
     /// @brief Efficiently waits for all the spawned tasks to be done.
-    /// For a coroutine awaitable, use `wait_idle`.
     void wait_fence() const noexcept
     {
       for (;;)
@@ -291,7 +268,7 @@ namespace stdcolt::coroutines
         if (expected == 0)
           break;
 
-        _pending.wait(expected, std::memory_order_acquire);
+        _pending.wait(expected, std::memory_order_relaxed);
       }
     }
 
@@ -307,8 +284,6 @@ namespace stdcolt::coroutines
     Executor& _executor;
     /// @brief The number of pending tasks
     std::atomic<size_t> _pending{0};
-    /// @brief Coroutine waiting for the scope to no longer have any tasks
-    atomic_coroutine_handle<> _waiter{std::coroutine_handle<>{}};
 
     /// @brief Detached task, the promise type of the parent coroutine
     struct detached_task
@@ -432,11 +407,6 @@ namespace stdcolt::coroutines
       {
         // wake blocking waiters
         _pending.notify_all();
-        // wake coroutine waiter
-        auto h =
-            _waiter.exchange(std::coroutine_handle<>{}, std::memory_order_acq_rel);
-        if (h)
-          h.resume();
       }
     }
   };
