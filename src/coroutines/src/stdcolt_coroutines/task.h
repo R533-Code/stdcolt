@@ -371,6 +371,7 @@ namespace stdcolt::coroutines
 
     decltype(auto) result() &
     {
+      STDCOLT_pre(handle, "Task was empty");
       STDCOLT_pre(is_ready(), "Task not ready yet");
       if constexpr (std::is_void_v<T>)
         handle.promise().result();
@@ -380,6 +381,7 @@ namespace stdcolt::coroutines
 
     decltype(auto) result() &&
     {
+      STDCOLT_pre(handle, "Task was empty");
       STDCOLT_pre(is_ready(), "Task not ready yet");
       if constexpr (std::is_void_v<T>)
         (std::move(handle.promise()).result());
