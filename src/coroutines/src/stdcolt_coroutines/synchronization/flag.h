@@ -109,6 +109,7 @@ namespace stdcolt::coroutines
 
   /// @brief Flag for multiple producers, multiple consumers.
   /// This flag should be used as an awaitable for `co_await`.
+  /// @warning Waiter coroutines must outlive the wait.
   class FlagMPMC
   {
     /// @brief List of waiters
