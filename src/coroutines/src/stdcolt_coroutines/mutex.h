@@ -71,19 +71,15 @@ namespace stdcolt::coroutines
     /// @return True if lock was successful
     bool try_lock() noexcept
     {
-      for (;;)
-      {
-        auto s = _state.load(std::memory_order_relaxed);
-        if (is_locked(s))
-          return false;
+      uintptr_t s = _state.load(std::memory_order_relaxed);
+      if (is_locked(s))
+        return false;
 
-        Waiter* head = head_from_state(s);
-        auto desired = make_state(head, true);
+      Waiter* head      = head_from_state(s);
+      uintptr_t desired = make_state(head, true);
 
-        if (_state.compare_exchange_weak(
-                s, desired, std::memory_order_acquire, std::memory_order_relaxed))
-          return true;
-      }
+      return _state.compare_exchange_strong(
+          s, desired, std::memory_order_acquire, std::memory_order_relaxed);
     }
 
     /// @brief Unlock the mutex
@@ -91,7 +87,7 @@ namespace stdcolt::coroutines
     {
       for (;;)
       {
-        auto s = _state.load(std::memory_order_acquire);
+        auto s = _state.load(std::memory_order_relaxed);
 
         STDCOLT_debug_pre(
             is_locked(s), "AsyncMutex::unlock() called while not locked");
@@ -173,7 +169,11 @@ namespace stdcolt::coroutines
               return true;
           }
         }
-        void await_resume() noexcept {}
+        void await_resume() noexcept
+        {
+          // synchronize with unlock() release
+          (void)m._state.load(std::memory_order_acquire);
+        }
       };
 
       return awaiter{*this};
