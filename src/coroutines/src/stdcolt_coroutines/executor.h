@@ -94,16 +94,26 @@ namespace stdcolt::coroutines
       }
     }
 
-    /// @brief Posts a coroutine to be executed immediately.
-    /// @param h The coroutine handle
-    /// @return True on success, false on failure
-    virtual PostStatus post(handle h) noexcept = 0;
-    /// @brief Posts a coroutine to be executed at a specific time point.
-    /// @param h The coroutine handle
-    /// @param when The time point when to execute the coroutine
-    /// @return True on success, false on failure
-    virtual PostStatus post(handle h, time_point when) noexcept = 0;
-    /// @brief Stops the executor, dropping any work remaining
+    /// @brief Work item that can be executed by an executor
+    struct WorkItem
+    {
+      /// @brief Function pointer to execute the work
+      void (*run)(void*) noexcept = nullptr;
+      /// @brief Context passed to run()
+      void* ctx = nullptr;
+    };
+
+    /// @brief Posts a work item to be executed immediately.
+    /// @param item The work item
+    /// @return PostStatus on success/failure
+    virtual PostStatus post(WorkItem item) noexcept = 0;
+    /// @brief Posts a work item to be executed at a specific time point.
+    /// @param item The work item
+    /// @param when The time point when to execute the item
+    /// @return PostStatus on success/failure
+    virtual PostStatus post(WorkItem item, time_point when) noexcept = 0;
+
+    /// @brief Stops the executor, draining any work remaining
     /// This method is thread safe and idempotent.
     /// @warning This function must never be called on one of the worker threads.
     virtual void stop() noexcept = 0;
@@ -115,14 +125,51 @@ namespace stdcolt::coroutines
     {
       struct awaiter
       {
-        Executor* ex;
-        PostStatus status{};
+        Executor* ex      = nullptr;
+        PostStatus status = PostStatus::POST_SUCCESS;
+
+        // Gate to prevent resume-before-suspend.
+        std::atomic<uint32_t> armed{0};
+        handle awaiting{};
+
+        static void run(void* p) noexcept
+        {
+          auto* self = static_cast<awaiter*>(p);
+
+          // wait until await_suspend() finished publishing state.
+          if (!self->armed.load(std::memory_order_acquire))
+            self->armed.wait(0, std::memory_order_acquire);
+
+          auto h = self->awaiting;
+          if (h && !h.done())
+          {
+            try
+            {
+              h.resume();
+            }
+            catch (...)
+            {
+              std::terminate();
+            }
+          }
+        }
+
         bool await_ready() const noexcept { return false; }
+
         bool await_suspend(handle h) noexcept
         {
-          status = ex->post(h);
-          // If posting failed, do NOT suspend, continue running inline.
-          return status == PostStatus::POST_SUCCESS;
+          awaiting = h;
+          armed.store(0, std::memory_order_relaxed);
+
+          // post a work item that will resume the awaiting coroutine.
+          // if posting failed, do NOT suspend, continue running inline.
+          status = ex->post(Executor::WorkItem{&awaiter::run, this});
+          if (status != PostStatus::POST_SUCCESS)
+            return false;
+          // publish: it is now safe for the worker to resume.
+          armed.store(1, std::memory_order_release);
+          armed.notify_one();
+          return true;
         }
         PostStatus await_resume() const noexcept { return status; }
       };
@@ -143,12 +190,37 @@ namespace stdcolt::coroutines
 
       struct awaiter
       {
-        Executor* ex;
-        time_point when;
-        duration tolerance;
+        Executor* ex = nullptr;
+        time_point when{};
+        duration tolerance{};
+
         PostStatus post_status = PostStatus::POST_SUCCESS;
         time_point expected{};
 
+        // gate to prevent resume before await_suspend returns.
+        std::atomic<uint32_t> armed{0};
+        handle awaiting{};
+
+        static void run(void* p) noexcept
+        {
+          auto* self = static_cast<awaiter*>(p);
+
+          if (!self->armed.load(std::memory_order_acquire))
+            self->armed.wait(0, std::memory_order_acquire);
+
+          auto h = self->awaiting;
+          if (h && !h.done())
+          {
+            try
+            {
+              h.resume();
+            }
+            catch (...)
+            {
+              std::terminate();
+            }
+          }
+        }
         bool await_ready() noexcept
         {
           expected = when;
@@ -159,20 +231,24 @@ namespace stdcolt::coroutines
           }
           return false;
         }
-
         bool await_suspend(handle h) noexcept
         {
-          if (post_status == PostStatus::POST_SUCCESS)
-            post_status = ex->post(h, when);
-          return post_status == PostStatus::POST_SUCCESS;
-        }
+          awaiting = h;
+          armed.store(0, std::memory_order_relaxed);
 
+          if (post_status == PostStatus::POST_SUCCESS)
+            post_status = ex->post(Executor::WorkItem{&awaiter::run, this}, when);
+          if (post_status != PostStatus::POST_SUCCESS)
+            return false;
+          armed.store(1, std::memory_order_release);
+          armed.notify_one();
+          return true;
+        }
         DelayStatus await_resume() const noexcept
         {
           using enum DelayStatus;
           if (post_status != PostStatus::POST_SUCCESS)
             return to_delay_failure(post_status);
-
           // post() succeeded, we actually resumed
           if (tolerance > duration::zero())
           {
@@ -232,31 +308,35 @@ namespace stdcolt::coroutines
     ~AsyncScope()
     {
       STDCOLT_assert(
-          _pending.load(std::memory_order_acquire) == 0,
+          _pending.load(std::memory_order_relaxed) == 0,
           "AsyncScope destroyed while operations are still pending");
     }
 
     /// @brief Submits an awaitable to execute in the executor
     /// @tparam Awaitable The awaitable type
     /// @param aw The awaitable
+    /// @return The executor post status
     template<typename Awaitable>
-    void spawn(Awaitable&& aw)
+    Executor::PostStatus spawn(Awaitable&& aw)
     {
       _pending.fetch_add(1, std::memory_order_relaxed);
-      try
-      {
-        // TODO: handle exceptions...
-        // create a detached coroutine bound to this scope
-        auto dt = make_detached(*this, std::forward<Awaitable>(aw));
 
-        // detach: the coroutine will self-destroy in final_suspend().
-        // setting handle = nullptr ensures detached_task's destructor does nothing.
-        dt.handle = nullptr;
-      }
-      catch (...)
+      detached_task dt  = make_detached(std::forward<Awaitable>(aw));
+      auto h            = dt.handle;
+      h.promise().scope = this; // set scope to this
+
+      // post onto executor.
+      auto ps = _executor.post(Executor::WorkItem{
+          &detached_task::promise_type::resume_callback, &h.promise()});
+
+      if (ps != Executor::PostStatus::POST_SUCCESS)
       {
-        on_task_done(); // decrements + notifies
+        // not scheduled => final_suspend won't run
+        if (h)
+          h.destroy();
+        on_task_done();
       }
+      return ps;
     }
 
     /// @brief Efficiently waits for all the spawned tasks to be done.
@@ -285,81 +365,73 @@ namespace stdcolt::coroutines
     /// @brief The number of pending tasks
     std::atomic<size_t> _pending{0};
 
-    /// @brief Detached task, the promise type of the parent coroutine
     struct detached_task
     {
-      /// @brief Promise type
       struct promise_type
       {
-        /// @brief Creates the detach task from the promise
+        AsyncScope* scope = nullptr;
+
+        static void resume_callback(void* p) noexcept
+        {
+          auto* self = static_cast<promise_type*>(p);
+          auto h     = std::coroutine_handle<promise_type>::from_promise(*self);
+          if (h && !h.done())
+          {
+            try
+            {
+              h.resume();
+            }
+            catch (...)
+            {
+              std::terminate();
+            }
+          }
+        }
         detached_task get_return_object() noexcept
         {
           return detached_task{
               std::coroutine_handle<promise_type>::from_promise(*this)};
         }
-
-        /// @brief Start executing directly so that the `.schedule()` happens.
-        /// This is needed to immediately pass the coroutine to the executor.
-        std::suspend_never initial_suspend() const noexcept { return {}; }
-
-        /// @brief Final awaitable, let the coroutine destroy itself
+        std::suspend_always initial_suspend() const noexcept { return {}; }
         struct final_awaitable
         {
           bool await_ready() const noexcept { return false; }
-          void await_suspend(std::coroutine_handle<> h) const noexcept
+          void await_suspend(std::coroutine_handle<promise_type> h) const noexcept
           {
+            // completion accounting happens exactly once here.
+            h.promise().scope->on_task_done();
+            // self-destroy (detached).
             h.destroy();
           }
           void await_resume() const noexcept {}
         };
-        /// @brief Destroy the coroutine
         auto final_suspend() const noexcept { return final_awaitable{}; }
-        /// @brief Does nothing
         void return_void() const noexcept {}
-        /// @brief On unhandled exceptions, terminate
-        void unhandled_exception() const noexcept
-        {
-          // no exception should happen here as make_detached already
-          // catches them all, but as a safety, terminate
-          std::terminate();
-        }
+        void unhandled_exception() const noexcept { std::terminate(); }
       };
-      /// @brief The coroutine handle
+
       std::coroutine_handle<promise_type> handle{};
 
-      /// @brief Constructor
       detached_task() noexcept = default;
-      /// @brief Constructor
-      /// @param h The underlying handle
+
       explicit detached_task(std::coroutine_handle<promise_type> h) noexcept
           : handle(h)
       {
       }
-      /// @brief Move constructor
-      /// @param other The other
+      ~detached_task() = default;
+
       detached_task(detached_task&& other) noexcept
           : handle(std::exchange(other.handle, nullptr))
       {
       }
-      /// @brief Move assignment operator
-      /// @param other Other
-      /// @return this
+
       detached_task& operator=(detached_task&& other) noexcept
       {
         if (this != &other)
-        {
-          if (handle)
-            handle.destroy();
           handle = std::exchange(other.handle, nullptr);
-        }
         return *this;
       }
-      /// @brief Destructor, destroys the handle if it is valid
-      ~detached_task()
-      {
-        if (handle)
-          handle.destroy();
-      }
+
       detached_task(const detached_task&)            = delete;
       detached_task& operator=(const detached_task&) = delete;
     };
@@ -371,22 +443,8 @@ namespace stdcolt::coroutines
     /// @param aw The awaitable to execute
     /// @return Detached task
     template<typename Awaitable>
-    static detached_task make_detached(AsyncScope& scope, Awaitable aw)
+    static detached_task make_detached(Awaitable aw)
     {
-      // ensures on_task_done() is called exactly once vvv
-      struct guard
-      {
-        AsyncScope* s;
-        ~guard()
-        {
-          if (s)
-            s->on_task_done();
-        }
-      };
-      guard g{&scope};
-
-      // move onto executor threads
-      co_await scope._executor.schedule();
       try
       {
         co_await std::move(aw);
@@ -434,16 +492,15 @@ namespace stdcolt::coroutines
     /// @tparam Awaitable The awaitable
     /// @param aw The awaitable to spawn in the thread pool executor
     template<typename Awaitable>
-    void spawn(Awaitable&& aw)
+    Executor::PostStatus spawn(Awaitable&& aw)
     {
-      _scope.spawn(std::forward<Awaitable>(aw));
+      return _scope.spawn(std::forward<Awaitable>(aw));
     }
 
   private:
     /// @brief Underlying AsyncScope
     AsyncScope _scope;
   };
-
 } // namespace stdcolt::coroutines
 
 #endif // !__HG_STDCOLT_COROUTINES_EXECUTOR

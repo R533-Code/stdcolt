@@ -36,70 +36,70 @@ namespace stdcolt::coroutines
     ThreadPoolExecutor& operator=(ThreadPoolExecutor&&)      = delete;
     ThreadPoolExecutor& operator=(const ThreadPoolExecutor&) = delete;
 
-    PostStatus post(handle h, time_point) noexcept override
+    PostStatus post(WorkItem, time_point) noexcept override
     {
       return PostStatus::POST_FAIL_NOT_IMPLEMENTED;
     }
 
-    /// @brief Post a coroutine to evaluate in the thread pool
-    /// @param h The coroutine to evaluate
-    /// @return True on success
-    PostStatus post(handle h) noexcept final
+    /// @brief Post a work item to evaluate in the thread pool
+    /// @param item The work item
+    /// @return PostStatus on success
+    PostStatus post(WorkItem item) noexcept final
     {
-      if (_stopping.load(std::memory_order_relaxed) != 0)
+      if (_stopping.load(std::memory_order_acquire) != 0)
         return PostStatus::POST_FAIL_STOPPED;
 
+      _outstanding.fetch_add(1, std::memory_order_relaxed);
+
       bool res = false;
-      // if we are in a specific worker thread, do not go through
-      // the global queue, instead directly enqueue in that thread.
       if (tls_executor_info.executor == this
           && tls_executor_info.worker_id != invalid_index)
-        res = _workers[tls_executor_info.worker_id].queue.enqueue(h);
+        res = _workers[tls_executor_info.worker_id].queue.enqueue(item);
       else
-        res = _global_queue.enqueue(h);
+        res = _global_queue.enqueue(item);
 
-      if (res)
+      if (!res)
       {
-        _work_epoch.fetch_add(1, std::memory_order_release);
-        _work_epoch.notify_one();
-        // ^^^ as the pool does work stealing, only a single one is needed.
-        return PostStatus::POST_SUCCESS;
+        _outstanding.fetch_sub(1, std::memory_order_relaxed);
+        return PostStatus::POST_FAIL_MEMORY;
       }
-      return PostStatus::POST_FAIL_MEMORY;
+
+      _work_epoch.fetch_add(1);
+      _work_epoch.notify_one();
+      return PostStatus::POST_SUCCESS;
     }
 
-    /// @brief Stops the executor. Work is not drained.
+    /// @brief Stops the executor. Work is drained.
     /// This method is thread safe and idempotent.
     /// @warning This function must never be called on one of the worker threads.
-    void stop() noexcept
+    void stop() noexcept override
     {
+      // transition 0 -> 1 (draining)
       if (_stopping.load(std::memory_order_acquire) == 2)
         return;
 
-      // acquire on failure as if expected == 2 we return directly
-      if (int32_t expected = 0; !_stopping.compare_exchange_strong(
+      int32_t expected = 0;
+      if (!_stopping.compare_exchange_strong(
               expected, 1, std::memory_order_acq_rel, std::memory_order_acquire))
       {
-        // if expected is not 1, then it is 2 and we can avoid calling .wait
         if (expected == 1)
           _stopping.wait(1, std::memory_order_acquire);
         return;
       }
-      _work_epoch.fetch_add(1, std::memory_order_release);
+
+      // wake all workers so they can start draining
+      _work_epoch.fetch_add(1);
       _work_epoch.notify_all();
 
-      // there is only a single thread that can be here vvv
       for (auto& [thread, _] : _workers)
-      {
         if (thread.joinable())
           thread.join();
-      }
+
       _stopping.store(2, std::memory_order_release);
       _stopping.notify_all();
-      // ^^^ wake up all threads waiting
     }
 
-  private:
+  protected:
     /// @brief Worker, must have a stable address
     struct Worker
     {
@@ -107,7 +107,7 @@ namespace stdcolt::coroutines
       std::thread thread;
       /// @brief The local queue.
       /// This queue is concurrent to allow safe work stealing.
-      moodycamel::ConcurrentQueue<handle> queue;
+      moodycamel::ConcurrentQueue<WorkItem> queue;
     };
 
     /// @brief Work epoch for efficient waiting
@@ -116,10 +116,12 @@ namespace stdcolt::coroutines
     /// @brief Array of workers, size constant throughout lifetime
     std::vector<Worker> _workers;
     /// @brief Global queue from which worker may pop work
-    moodycamel::ConcurrentQueue<handle> _global_queue;
+    moodycamel::ConcurrentQueue<WorkItem> _global_queue;
     /// @brief If 0, stop was not requested, if 1, stop requested, if 2 stopped
     /// It is preferable to use 32 bit integers for a direct lowering to futexes.
     std::atomic<int32_t> _stopping{0};
+    /// @brief Work queued and in progress
+    std::atomic<uint64_t> _outstanding{0};
 
     /// @brief Invalid index to represent an invalid worker ID
     static constexpr size_t invalid_index = (size_t)-1;
@@ -143,39 +145,59 @@ namespace stdcolt::coroutines
       auto& self_queue          = _workers[index].queue;
       const size_t worker_count = _workers.size();
 
-      while (!_stopping.load(std::memory_order_acquire))
+      auto consume_one = [&]() noexcept
       {
-        handle h;
-        // dequeue from the local or on empty local queue, from the global
-        if (self_queue.try_dequeue(h) || _global_queue.try_dequeue(h))
+        const auto prev = _outstanding.fetch_sub(1, std::memory_order_relaxed);
+        STDCOLT_assert(prev > 0, "outstanding underflow");
+
+        if (prev == 1 && _stopping.load(std::memory_order_relaxed) != 0)
         {
-          if (!h.done())
-            h.resume();
+          _work_epoch.fetch_add(1, std::memory_order_relaxed);
+          _work_epoch.notify_all();
+        }
+      };
+
+      auto run_one = [&](WorkItem item) noexcept
+      {
+        if (item.run != nullptr)
+          item.run(item.ctx); // noexcept
+
+        consume_one();
+      };
+
+      for (;;)
+      {
+        WorkItem item;
+
+        if (self_queue.try_dequeue(item) || _global_queue.try_dequeue(item))
+        {
+          run_one(item);
           continue;
         }
 
-        // steal from other workers
-        bool stolen = false;
+        bool got = false;
         for (size_t i = 0; i < worker_count; ++i)
         {
           if (i == index)
             continue;
-          if (_workers[i].queue.try_dequeue(h))
+          if (_workers[i].queue.try_dequeue(item))
           {
-            stolen = true;
-            if (!h.done())
-              h.resume();
+            got = true;
+            run_one(item);
             break;
           }
         }
-        if (stolen)
+        if (got)
           continue;
 
-        // if there is no work to be done, sleep efficiently
-        auto expected = _work_epoch.load(std::memory_order_acquire);
-        if (_stopping.load(std::memory_order_acquire))
-          break;
-        _work_epoch.wait(expected, std::memory_order_acquire);
+        if (_stopping.load(std::memory_order_relaxed) != 0)
+        {
+          if (_outstanding.load(std::memory_order_relaxed) == 0)
+            break;
+        }
+
+        const auto expected = _work_epoch.load(std::memory_order_acquire);
+        _work_epoch.wait(expected, std::memory_order_relaxed);
       }
 
       tls_executor_info = {nullptr, invalid_index};
@@ -197,7 +219,7 @@ namespace stdcolt::coroutines
 
     ~ScheduledThreadPoolExecutor() override { stop(); }
 
-    PostStatus post(handle h, time_point when) noexcept override
+    PostStatus post(WorkItem item, time_point when) noexcept override
     {
       using enum PostStatus;
 
@@ -214,8 +236,9 @@ namespace stdcolt::coroutines
           if (_timer_state.load(std::memory_order_acquire) != 0)
             return POST_FAIL_STOPPED;
 
-          _scheduled.emplace(
-              when, h, _next_id.fetch_add(1, std::memory_order_relaxed));
+          _scheduled.emplace(ScheduledItem{
+              when, item, _next_id.fetch_add(1, std::memory_order_relaxed)});
+          _outstanding.fetch_add(1, std::memory_order_relaxed);
         }
         _timer_cv.notify_one();
         return POST_SUCCESS;
@@ -244,6 +267,11 @@ namespace stdcolt::coroutines
         return;
       }
 
+      {
+        // notify_all does not guarantee that threads beginning to wait
+        // later will observe the notification...
+        std::lock_guard<std::mutex> lk(_timer_mutex);
+      }
       _timer_cv.notify_all();
       if (_timer_thread.joinable())
         _timer_thread.join();
@@ -259,7 +287,7 @@ namespace stdcolt::coroutines
     struct ScheduledItem
     {
       time_point when;
-      handle h;
+      WorkItem item;
       uint64_t id; // tie-breaker to keep ordering stable
     };
 
@@ -290,53 +318,75 @@ namespace stdcolt::coroutines
 
     void timer_loop()
     {
-      auto lk = std::unique_lock{_timer_mutex};
+      std::unique_lock lk{_timer_mutex};
+
+      auto consume_one_scheduled = [&]() noexcept
+      {
+        const auto prev = _outstanding.fetch_sub(1, std::memory_order_relaxed);
+        STDCOLT_assert(prev > 0, "outstanding underflow (scheduled)");
+
+        // if draining and we just hit 0, wake pool sleepers so they can exit.
+        if (prev == 1 && _stopping.load(std::memory_order_relaxed) != 0)
+        {
+          _work_epoch.fetch_add(1, std::memory_order_relaxed);
+          _work_epoch.notify_all();
+        }
+      };
 
       for (;;)
       {
-        // Check for stop
-        if (_timer_state.load(std::memory_order_acquire) != 0)
+        if (_timer_state.load(std::memory_order_acquire) != 0 && _scheduled.empty())
           break;
 
         if (_scheduled.empty())
         {
-          _timer_cv.wait(
-              lk,
-              [this]
-              {
-                return _timer_state.load(std::memory_order_acquire) != 0
-                       || !_scheduled.empty();
-              });
+          while (_scheduled.empty()
+                 && _timer_state.load(std::memory_order_acquire) == 0)
+            _timer_cv.wait(lk);
           continue;
         }
 
-        auto next_when = _scheduled.top().when;
+        const auto next_when = _scheduled.top().when;
 
-        // wait until next deadline or stop
+        // Wake on stop requested or new earlier deadline
         _timer_cv.wait_until(
             lk, next_when,
-            [this] { return _timer_state.load(std::memory_order_acquire) != 0; });
+            [this, next_when]
+            {
+              if (_timer_state.load(std::memory_order_acquire) != 0)
+                return true;
+              return !_scheduled.empty() && _scheduled.top().when < next_when;
+            });
 
-        if (_timer_state.load(std::memory_order_acquire) != 0)
-          break;
-
-        if (auto now = clock::now(); now < next_when)
+        // if new earlier deadline, restart
+        if (!_scheduled.empty() && _scheduled.top().when < next_when)
           continue;
 
-        // time reached (or passed) for the top item
-        ScheduledItem item = _scheduled.top();
-        _scheduled.pop();
+        // dispatch all due items
+        const auto now = clock::now();
+        while (!_scheduled.empty() && _scheduled.top().when <= now)
+        {
+          ScheduledItem item = _scheduled.top();
+          _scheduled.pop();
 
-        lk.unlock();
-        if (!item.h.done())
-          (void)ThreadPoolExecutor::post(item.h);
+          lk.unlock();
 
-        lk.lock();
+          consume_one_scheduled();
+
+          if (item.item.run != nullptr)
+          {
+            const auto ps = ThreadPoolExecutor::post(item.item);
+            if (ps != PostStatus::POST_SUCCESS)
+            {
+              // fallback: execute on timer thread so work is not lost.
+              // NOTE: Work items must not block here.
+              item.item.run(item.item.ctx); // noexcept
+            }
+          }
+
+          lk.lock();
+        }
       }
-
-      // drop remaining scheduled work
-      while (!_scheduled.empty())
-        _scheduled.pop();
     }
   };
 
