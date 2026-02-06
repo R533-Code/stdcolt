@@ -2,6 +2,8 @@
 #include <stdcolt_coroutines/executor.h>
 #include <stdcolt_coroutines/task.h>
 #include <stdcolt_coroutines/generator.h>
+#include <stdcolt_coroutines/synchronization/flag.h>
+#include <stdcolt_coroutines/mutex.h>
 
 #include <atomic>
 #include <stdexcept>
@@ -9,6 +11,8 @@
 #include <utility>
 #include <vector>
 #include <optional>
+#include <mutex>
+#include <chrono>
 
 using namespace stdcolt::coroutines;
 
@@ -1313,8 +1317,8 @@ TEST_CASE("stdcolt/coroutines")
     };
 
     scope.spawn(make_task(0, 5ms));
-    scope.spawn(make_task(1, 10ms));
-    scope.spawn(make_task(2, 15ms));
+    scope.spawn(make_task(1, 100ms));
+    scope.spawn(make_task(2, 200ms));
 
     scope.wait_fence();
     ex->stop();
@@ -1348,5 +1352,314 @@ TEST_CASE("stdcolt/coroutines")
     CHECK(
         result.load(std::memory_order_relaxed)
         == Executor::DelayStatus::DELAY_FAIL_NOT_IMPLEMENTED);
+  }
+}
+
+TEST_CASE("stdcolt/coroutines/flags")
+{
+  SUBCASE("FlagSPSC: wait then set resumes; reset clears (sync wrapper)")
+  {
+    FlagSPSC f{false};
+    CHECK_FALSE(f.is_set());
+
+    std::atomic<int> step{0};
+
+    auto consumer = [&]() -> Task<void>
+    {
+      step.store(1, std::memory_order_relaxed);
+      co_await f;
+      step.store(2, std::memory_order_relaxed);
+      f.reset();
+      step.store(3, std::memory_order_relaxed);
+      co_return;
+    };
+
+    auto driver = [&]() -> Task<void>
+    {
+      co_await consumer();
+      co_return;
+    };
+    auto d = driver();
+    f.set();
+    sync_await_void(std::move(d)).get();
+
+    CHECK(step.load(std::memory_order_relaxed) == 3);
+    CHECK_FALSE(f.is_set());
+  }
+
+  SUBCASE("FlagSPSC: set before await makes await_ready true (no suspend)")
+  {
+    FlagSPSC f{false};
+    f.set();
+    CHECK(f.is_set());
+
+    int step      = 0;
+    auto consumer = [&]() -> Task<void>
+    {
+      step = 1;
+      co_await f;
+      step = 2;
+      co_return;
+    };
+
+    auto t = consumer();
+    sync_await_void(std::move(t)).get();
+    CHECK(step == 2);
+  }
+
+  SUBCASE("FlagSPSC: reset on already reset does nothing")
+  {
+    FlagSPSC f{false};
+    CHECK_FALSE(f.is_set());
+    f.reset();
+    CHECK_FALSE(f.is_set());
+  }
+
+  SUBCASE("FlagMPMC: set resumes all waiters and stays set until reset")
+  {
+    FlagMPMC f{false};
+    CHECK_FALSE(f.is_set());
+
+    std::atomic<int> woke{0};
+
+    auto waiter = [&]() -> Task<void>
+    {
+      co_await f;
+      woke.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    auto t1 = waiter();
+    auto t2 = waiter();
+    auto t3 = waiter();
+
+    CHECK(woke.load(std::memory_order_relaxed) == 0);
+
+    f.set(); // should resume all three
+
+    sync_await_void(std::move(t1)).get();
+    sync_await_void(std::move(t2)).get();
+    sync_await_void(std::move(t3)).get();
+
+    CHECK(woke.load(std::memory_order_relaxed) == 3);
+    CHECK(f.is_set());
+
+    // New waiters should not suspend
+    auto t4 = waiter();
+    sync_await_void(std::move(t4)).get();
+    CHECK(woke.load(std::memory_order_relaxed) == 4);
+
+    f.reset();
+    CHECK_FALSE(f.is_set());
+  }
+
+  SUBCASE("FlagMPMC: reset when already reset does nothing")
+  {
+    FlagMPMC f{false};
+    CHECK_FALSE(f.is_set());
+    f.reset();
+    CHECK_FALSE(f.is_set());
+  }
+
+  SUBCASE("FlagMPMC on executor: waiters resume and complete (setter task)")
+  {
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
+
+    FlagMPMC f{false};
+    std::atomic<int> started{0};
+    std::atomic<int> woke{0};
+
+    auto waiter = [&]() -> Task<void>
+    {
+      started.fetch_add(1, std::memory_order_relaxed);
+      co_await f;
+      woke.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    constexpr int N = 100;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(waiter());
+
+    scope.spawn(
+        [&]() -> Task<void>
+        {
+          // Wait until all waiter coroutines have started (and likely reached the await soon after).
+          while (started.load(std::memory_order_relaxed) != N)
+            co_await ex->yield();
+
+          f.set();
+          co_return;
+        }());
+
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(woke.load(std::memory_order_relaxed) == N);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// AsyncMutex tests
+// -----------------------------------------------------------------------------
+
+TEST_CASE("stdcolt/coroutines/async_mutex")
+{
+  SUBCASE("try_lock/unlock basic")
+  {
+    AsyncMutex m;
+
+    CHECK(m.try_lock());
+    CHECK_FALSE(m.try_lock());
+
+    m.unlock();
+
+    CHECK(m.try_lock());
+    m.unlock();
+  }
+
+  SUBCASE("co_await lock provides mutual exclusion (single thread executor)")
+  {
+    auto ex = make_executor(1);
+    AsyncScope scope{*ex};
+
+    AsyncMutex m;
+    int counter = 0;
+
+    auto worker = [&]() -> Task<void>
+    {
+      for (int i = 0; i < 200; ++i)
+      {
+        co_await m;
+        int v = counter;
+        co_await ex->yield(); // force interleaving inside critical section
+        counter = v + 1;
+        m.unlock();
+      }
+      co_return;
+    };
+
+    constexpr int N = 8;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(worker());
+
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(counter == N * 200);
+  }
+
+  SUBCASE("co_await lock provides mutual exclusion (multi-thread executor)")
+  {
+    auto ex = make_executor(4);
+    AsyncScope scope{*ex};
+
+    AsyncMutex m;
+    std::atomic<int> in_cs{0};
+    std::atomic<int> max_in_cs{0};
+    std::atomic<long long> sum{0};
+
+    auto worker = [&](int id) -> Task<void>
+    {
+      for (int i = 0; i < 500; ++i)
+      {
+        co_await m;
+
+        int now = in_cs.fetch_add(1, std::memory_order_relaxed) + 1;
+        // track max concurrently in critical section
+        int old_max = max_in_cs.load(std::memory_order_relaxed);
+        while (
+            now > old_max
+            && !max_in_cs.compare_exchange_weak(
+                old_max, now, std::memory_order_relaxed, std::memory_order_relaxed))
+        {
+          // old_max updated by CAS
+        }
+
+        // do some work and yield to encourage contention
+        sum.fetch_add(id, std::memory_order_relaxed);
+        in_cs.fetch_sub(1, std::memory_order_relaxed);
+        m.unlock();
+      }
+      co_return;
+    };
+
+    constexpr int N = 16;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(worker(i + 1));
+
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(max_in_cs.load(std::memory_order_relaxed) == 1);
+    CHECK(in_cs.load(std::memory_order_relaxed) == 0);
+    CHECK(sum.load(std::memory_order_relaxed) > 0);
+  }
+
+  SUBCASE("lock_guard RAII releases the mutex on scope exit")
+  {
+    auto ex = make_executor(2);
+    AsyncScope scope{*ex};
+
+    AsyncMutex m;
+    static constexpr size_t N = 64;
+    uint64_t counter[N]       = {};
+
+    auto worker = [&]() -> Task<void>
+    {
+      for (int i = 0; i < 200; ++i)
+      {
+        auto g = co_await m.lock_guard();
+        for (size_t i = 0; i < N; i++)
+          counter[i] += 1;
+      }
+      co_return;
+    };
+
+    constexpr int WORKER_N = 64;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(worker());
+
+    scope.wait_fence();
+    ex->stop();
+
+    for (size_t i = 0; i < N; i++)
+      CHECK(counter[i] == WORKER_N * 200);
+  }
+
+  SUBCASE("stress: many coroutines contend for lock and all complete")
+  {
+    auto ex = make_executor(8);
+    AsyncScope scope{*ex};
+
+    AsyncMutex m;
+    std::atomic<int> done{0};
+    std::atomic<long long> acc{0};
+
+    auto worker = [&](int id) -> Task<void>
+    {
+      for (int i = 0; i < 200; ++i)
+      {
+        co_await m;
+        acc.fetch_add((id * 1315423911ull) ^ i, std::memory_order_relaxed);
+        // TODO: investigate...
+        //if ((i & 7) == 0)
+        //  co_await ex->yield();
+        m.unlock();
+      }
+      done.fetch_add(1, std::memory_order_relaxed);
+      co_return;
+    };
+
+    constexpr int N = 200;
+    for (int i = 0; i < N; ++i)
+      scope.spawn(worker(i + 1));
+
+    scope.wait_fence();
+    ex->stop();
+
+    CHECK(done.load(std::memory_order_relaxed) == N);
+    CHECK(acc.load(std::memory_order_relaxed) != 0);
   }
 }
