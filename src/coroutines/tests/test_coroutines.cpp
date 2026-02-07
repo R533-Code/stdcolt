@@ -1643,9 +1643,8 @@ TEST_CASE("stdcolt/coroutines/async_mutex")
       {
         co_await m;
         acc.fetch_add((id * 1315423911ull) ^ i, std::memory_order_relaxed);
-        // TODO: investigate...
-        //if ((i & 7) == 0)
-        //  co_await ex->yield();
+        if ((i & 7) == 0)
+          co_await ex->yield();
         m.unlock();
       }
       done.fetch_add(1, std::memory_order_relaxed);
