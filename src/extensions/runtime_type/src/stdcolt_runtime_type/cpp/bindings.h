@@ -342,12 +342,23 @@ namespace stdcolt::ext::rt
   template<class R, class... A>
   Type type_of_fn(RuntimeContext* ctx) noexcept
   {
-    Type ret    = type_of<R>(ctx);
-    Type argv[] = {type_of<A>(ctx)...};
-    if (auto _ret = stdcolt_ext_rt_type_create_fn(ctx, ret, {argv, sizeof...(A)});
-        _ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
-      return _ret.data.success.type;
-    return nullptr;
+    if constexpr (sizeof...(A) == 0)
+    {
+      Type ret = type_of<R>(ctx);
+      if (auto _ret = stdcolt_ext_rt_type_create_fn(ctx, ret, {nullptr, 0});
+          _ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return _ret.data.success.type;
+      return nullptr;
+    }
+    else
+    {
+      Type ret    = type_of<R>(ctx);
+      Type argv[] = {type_of<A>(ctx)...};
+      if (auto _ret = stdcolt_ext_rt_type_create_fn(ctx, ret, {argv, sizeof...(A)});
+          _ret.result == STDCOLT_EXT_RT_TYPE_SUCCESS)
+        return _ret.data.success.type;
+      return nullptr;
+    }
   }
 
   template<class R, class... A>
@@ -415,16 +426,16 @@ namespace stdcolt::ext::rt
     Member make_member(RuntimeContext* ctx) const noexcept
     {
       Member m{};
-      m.name              = {nm.data(), nm.size()};
-      m.description       = {doc.data(), doc.size()};
+      m.name              = {(const char*)nm.data(), nm.size()};
+      m.description       = {(const char*)doc.data(), doc.size()};
       m.address_or_offset = (uintptr_t)(&method_thunk<PMF>::call);
-      m.kind              = STDCOLT_EXT_RT_MEMBER_FUNCTION;
+      m.kind              = STDCOLT_EXT_RT_MEMBER_METHOD;
       m.type              = method_thunk<PMF>::signature(ctx);
       return m;
     }
   };
 
-  template<typename Owner, class FieldT, std::size_t Offset>
+  template<typename Owner, class FieldT, size_t Offset>
   struct field
   {
     std::u8string_view nm;
