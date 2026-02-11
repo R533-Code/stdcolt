@@ -9,6 +9,7 @@
 namespace stdcolt::coroutines
 {
   /// @brief Mutex suitable for usage with coroutines.
+  /// @warning Waiting coroutines must never be destroyed while waiting.
   class AsyncMutex
   {
     /// @brief Linked list of waiters.
@@ -87,7 +88,7 @@ namespace stdcolt::coroutines
     {
       for (;;)
       {
-        auto s = _state.load(std::memory_order_relaxed);
+        auto s = _state.load(std::memory_order_acquire);
 
         STDCOLT_debug_pre(
             is_locked(s), "AsyncMutex::unlock() called while not locked");
