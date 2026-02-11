@@ -224,8 +224,8 @@ extern "C"
   {
     /// @brief Represents a byte offset from the start of the object
     STDCOLT_EXT_RT_MEMBER_FIELD,
-    /// @brief Represents a function address
-    STDCOLT_EXT_RT_MEMBER_FUNCTION,
+    /// @brief Represents a method address (first argument is `void*`/`const void*`)
+    STDCOLT_EXT_RT_MEMBER_METHOD,
     /// @brief Represents static data address
     STDCOLT_EXT_RT_MEMBER_STATIC_FIELD,
 
