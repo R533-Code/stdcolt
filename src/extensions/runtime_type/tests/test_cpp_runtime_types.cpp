@@ -10,6 +10,8 @@ struct CxxBindingBasicPOD
   double b;
   int16_t c;
   uint64_t d;
+
+  double product(double a, double b) const noexcept { return a * b + this->b; }
 };
 
 TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
@@ -158,7 +160,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
       STDCOLT_RT_FIELD(CxxBindingBasicPOD, a, u8"a", u8"Hello member a!"),
       STDCOLT_RT_FIELD(CxxBindingBasicPOD, b, u8"b", u8"Hello member b!"),
       STDCOLT_RT_FIELD(CxxBindingBasicPOD, c, u8"c", u8"Hello member c!"),
-      STDCOLT_RT_FIELD(CxxBindingBasicPOD, d, u8"d", u8"Hello member d!"));
+      STDCOLT_RT_FIELD(CxxBindingBasicPOD, d, u8"d", u8"Hello member d!"),
+      STDCOLT_RT_METHOD(CxxBindingBasicPOD, product, u8"product", u8"Hello member product!"));
   REQUIRE(_CxxBindingBasicPOD.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
 
   SUBCASE("SharedAny empty checks")
@@ -319,11 +322,18 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
     REQUIRE(ptr->d == 4);
 
     // member lookup through wrapper
-    auto a_ptr = s.lookup_field<uint8_t>(u8"a");
+    auto a_ptr  = s.lookup_field<uint8_t>(u8"a");
     REQUIRE(a_ptr != nullptr);
     REQUIRE(*a_ptr == 1);
     *a_ptr = 10;
     REQUIRE(ptr->a == 10);
+    auto bound = s.lookup_method<uint8_t (*)(CxxBindingBasicPOD*)>(u8"a");   
+    REQUIRE(bound == nullptr);
+    auto bound2 =
+        s.lookup_method<double (*)(const CxxBindingBasicPOD*, double, double)>(u8"product");
+    REQUIRE(bound2 != nullptr);
+    REQUIRE(bound2.base_address() == s.base_address());
+    REQUIRE(bound2(10.0, 0.0) == 0.2);
   }
 
   stdcolt_ext_rt_destroy(ctx);
