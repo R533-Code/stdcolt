@@ -20,6 +20,86 @@
 /// @brief C++ wrappers and utilities over the `stdcolt_ext_rt` C API
 namespace stdcolt::ext::rt
 {
+  /// @brief A method that is bound to a specific instance.
+  /// The `bound_typed_method` is only valid as long as the instance is not
+  /// moved or destroyed.
+  /// @tparam T The type of the instance
+  /// @tparam RetT The return type of the method
+  /// @tparam ...ArgsT The arguments of the method (not including `this`)
+  template<typename T, typename RetT, typename... ArgsT>
+  struct bound_typed_method
+  {
+    /// @brief The opaque pointer to the instance, qualified as required by the method
+    using opaque_t = std::conditional_t<std::is_const_v<T>, const void*, void*>;
+    /// @brief The callable function pointer type, with `this` of type `opaque_t`
+    using callable_t = RetT (*)(opaque_t, ArgsT...);
+    /// @brief True if the method receives `this` as const.
+    static constexpr bool is_method_const = std::is_const_v<T>;
+
+  private:
+    /// @brief The base address
+    opaque_t _base_address = {};
+    /// @brief The callable address
+    callable_t _callable_address = {};
+
+  public:
+    /// @brief Default constructor, creates an empty `bound_typed_method`
+    constexpr bound_typed_method() noexcept                                = default;
+    constexpr bound_typed_method(bound_typed_method&&) noexcept            = default;
+    constexpr bound_typed_method& operator=(bound_typed_method&&) noexcept = default;
+    constexpr bound_typed_method(const bound_typed_method&) noexcept       = default;
+    constexpr bound_typed_method& operator=(const bound_typed_method&) noexcept =
+        default;
+    /// @brief Equivalent to the default constructor, creates an empty `bound_method`
+    constexpr bound_typed_method(std::nullptr_t) noexcept
+        : bound_typed_method()
+    {
+    }
+    /// @brief Constructor
+    /// @param base_address The base address
+    /// @param callable_address The callable address
+    constexpr bound_typed_method(
+        opaque_t base_address, RetT (*callable_address)(opaque_t, ArgsT...)) noexcept
+        : _base_address(base_address)
+        , _callable_address(callable_address)
+    {
+      STDCOLT_pre(
+          (base_address == nullptr) == (callable_address == nullptr),
+          "base_address and callable_address must either both be null or both "
+          "non-null");
+    }
+
+    /// @brief Call operator to call the `bound_typed_method`.
+    /// @tparam ...ArgsT2 The parameter pack (used for perfect forwarding)
+    /// @param ...args The argument pack
+    /// @return The value returned by the callable
+    /// @pre bound method must not be empty!
+    template<typename... ArgsT2>
+      requires(std::same_as<ArgsT, ArgsT2> && ...)
+    constexpr RetT operator()(ArgsT2&&... args)
+    {
+      STDCOLT_pre(!is_empty(), "empty bound_typed_method!");
+      return _callable_address(_base_address, std::forward<ArgsT2>(args)...);
+    }
+    /// @brief Returns the base address of the instance
+    /// @return Base address or null on empty
+    constexpr opaque_t base_address() const noexcept { return _base_address; }
+    /// @brief Returns the callable address
+    /// @return Callable address
+    constexpr callable_t callable_address() const noexcept
+    {
+      return _callable_address;
+    }
+    /// @brief Check if the bound method is empty
+    /// @return True if empty (and thus may not be called)
+    constexpr bool is_empty() const noexcept { return _base_address == nullptr; }
+    constexpr bool operator==(std::nullptr_t) const noexcept { return is_empty(); }
+    constexpr bool operator!=(std::nullptr_t) const noexcept { return !is_empty(); }
+    constexpr bool operator==(const bound_typed_method&) const noexcept = default;
+    constexpr bool operator!=(const bound_typed_method&) const noexcept = default;
+    constexpr operator bool() const noexcept { return !is_empty(); }
+  };
+
   /// @brief Member kind
   enum class MemberKind : uint8_t
   {
@@ -27,8 +107,8 @@ namespace stdcolt::ext::rt
     MEMBER_FIELD = STDCOLT_EXT_RT_MEMBER_FIELD,
     /// @brief Static data field
     MEMBER_STATIC_FIELD = STDCOLT_EXT_RT_MEMBER_STATIC_FIELD,
-    /// @brief Non-static function (method)
-    MEMBER_FUNCTION = STDCOLT_EXT_RT_MEMBER_FUNCTION,
+    /// @brief Non-static method
+    MEMBER_METHOD = STDCOLT_EXT_RT_MEMBER_METHOD,
   };
 
   /// @brief Reflect member information
@@ -259,22 +339,22 @@ namespace stdcolt::ext::rt
 
 #define __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(KIND, NAME)             \
   template<typename T>                                                       \
-  const T* NAME##_fast(std::u8string_view m) const noexcept                  \
+  auto NAME##_fast(std::u8string_view m) const noexcept                      \
   {                                                                          \
     return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast, KIND>(*this, m); \
   }                                                                          \
   template<typename T>                                                       \
-  T* NAME##_fast(std::u8string_view m) noexcept                              \
+  auto NAME##_fast(std::u8string_view m) noexcept                            \
   {                                                                          \
     return lookup_impl<T, &stdcolt_ext_rt_type_lookup_fast, KIND>(*this, m); \
   }                                                                          \
   template<typename T>                                                       \
-  const T* NAME(std::u8string_view m) const noexcept                         \
+  auto NAME(std::u8string_view m) const noexcept                             \
   {                                                                          \
     return lookup_impl<T, &stdcolt_ext_rt_type_lookup, KIND>(*this, m);      \
   }                                                                          \
   template<typename T>                                                       \
-  T* NAME(std::u8string_view m) noexcept                                     \
+  auto NAME(std::u8string_view m) noexcept                                   \
   {                                                                          \
     return lookup_impl<T, &stdcolt_ext_rt_type_lookup, KIND>(*this, m);      \
   }
@@ -283,6 +363,8 @@ namespace stdcolt::ext::rt
         STDCOLT_EXT_RT_MEMBER_FIELD, lookup_field)
     __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
         STDCOLT_EXT_RT_MEMBER_STATIC_FIELD, lookup_static_field)
+    __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
+        STDCOLT_EXT_RT_MEMBER_METHOD, lookup_method)
 
     /***************************/
     // LIFETIME
@@ -468,6 +550,8 @@ namespace stdcolt::ext::rt
         STDCOLT_EXT_RT_MEMBER_FIELD, lookup_field)
     __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
         STDCOLT_EXT_RT_MEMBER_STATIC_FIELD, lookup_static_field)
+    __STDCOLT_RUNTIME_TYPE_DEFINE_LOOKUP_METHODS(
+        STDCOLT_EXT_RT_MEMBER_METHOD, lookup_method)
 
     /***************************/
     // REFLECTION API
@@ -738,45 +822,158 @@ namespace stdcolt::ext::rt
     }
   }
 
+  namespace detail
+  {
+    template<class>
+    struct fnptr_traits;
+
+    template<class Ret, class... Args>
+    struct fnptr_traits<Ret (*)(Args...)>
+    {
+      using ret_t                   = Ret;
+      static constexpr size_t arity = sizeof...(Args);
+
+      template<size_t I>
+      using arg_t = std::tuple_element_t<I, std::tuple<Args...>>;
+
+      // tuple of args excluding the first
+      using tail_args_tuple_t = decltype(std::tuple_cat(
+          std::declval<std::tuple<>>(), std::declval<std::tuple<Args...>>()));
+    };
+
+    // remove first element from a tuple vvv
+    template<class Tuple>
+    struct tuple_tail;
+    template<class A0, class... As>
+    struct tuple_tail<std::tuple<A0, As...>>
+    {
+      using type = std::tuple<As...>;
+    };
+
+    template<class Ret, class... Args>
+    struct fnptr_traits2
+    {
+      using ret_t                   = Ret;
+      using args_tuple_t            = std::tuple<Args...>;
+      static constexpr size_t arity = sizeof...(Args);
+
+      using this_param_t = std::tuple_element_t<0, args_tuple_t>;
+      using tail_tuple_t = typename tuple_tail<args_tuple_t>::type;
+    };
+
+    template<class>
+    struct method_sig;
+
+    template<class Ret, class This, class... Args>
+    struct method_sig<Ret (*)(This, Args...)>
+    {
+      static_assert(
+          sizeof...(Args) + 1 >= 1, "method must have at least a this parameter");
+
+      static constexpr bool this_is_ptr =
+          std::is_pointer_v<std::remove_reference_t<This>>;
+      static constexpr bool this_is_ref = std::is_reference_v<This>;
+      static_assert(
+          this_is_ptr || this_is_ref, "this parameter must be pointer or reference");
+
+      // object type carried by `this` (with constness preserved)
+      using obj_t = std::remove_pointer_t<std::remove_reference_t<This>>;
+
+      // decide erased this type from constness of obj_t
+      using opaque_t = std::conditional_t<
+          std::is_const_v<std::remove_reference_t<obj_t>>, const void*, void*>;
+
+      using erased_fn_t = Ret (*)(opaque_t, Args...);
+      using bound_t     = bound_typed_method<obj_t, Ret, Args...>;
+      using ret_t       = Ret;
+    };
+
+    template<class Ret, class This, class... Args>
+    struct method_sig<Ret (*)(This, Args...) noexcept>
+        : method_sig<Ret (*)(This, Args...)>
+    {
+    };
+
+    template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
+    static auto lookup_member(Self& self, std::u8string_view member) noexcept
+    {
+      if (self.is_empty())
+      {
+        if constexpr (KIND == STDCOLT_EXT_RT_MEMBER_METHOD)
+          return typename method_sig<T>::bound_t{}; // empty bound_method
+        else
+          return (std::conditional_t<std::is_pointer_v<T>, T, T*>)nullptr;
+      }
+
+      auto name = stdcolt_ext_rt_StringView{
+          reinterpret_cast<const char*>(member.data()), member.size()};
+
+      if constexpr (KIND == STDCOLT_EXT_RT_MEMBER_METHOD)
+      {
+        // T is the user-facing signature: Ret(*)(This, Args...)
+        using ms = method_sig<T>;
+
+        auto* ctx = self.context();
+        STDCOLT_debug_assert(ctx != nullptr, "");
+
+        Type expected_obj =
+            type_of<std::remove_cv_t<std::remove_reference_t<typename ms::obj_t>>>(
+                ctx);
+        if (expected_obj != self.type())
+          return typename ms::bound_t{};
+
+        // Lookup using the erased method type: Ret(*)(opaque_t, Args...)
+        Type expected_method = type_of<typename ms::erased_fn_t>(ctx);
+
+        auto res = LookupFn(self.type(), &name, expected_method, KIND);
+        if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
+          return typename ms::bound_t{};
+
+        // bind base address + callable pointer
+        const auto callable = reinterpret_cast<typename ms::erased_fn_t>(
+            res.data.found.address_or_offset);
+        const auto base =
+            reinterpret_cast<typename ms::opaque_t>(self.base_address());
+        return typename ms::bound_t{base, callable};
+      }
+      else
+      {
+        // FIELD / STATIC_FIELD
+        using ptr_t = std::conditional_t<
+            KIND == STDCOLT_EXT_RT_MEMBER_FIELD,
+            std::conditional_t<std::is_const_v<Self>, const T*, T*>,
+            std::conditional_t<std::is_pointer_v<T>, T, T*>>;
+
+        auto res = LookupFn(self.type(), &name, type_of<T>(self.context()), KIND);
+        if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
+          return (ptr_t) nullptr;
+
+        const uintptr_t ao = res.data.found.address_or_offset;
+
+        if constexpr (KIND == STDCOLT_EXT_RT_MEMBER_FIELD)
+        {
+          auto base = static_cast<const std::byte*>(self.base_address());
+          auto addr = base + ao;
+          return reinterpret_cast<ptr_t>(const_cast<std::byte*>(addr));
+        }
+        else
+        {
+          return reinterpret_cast<ptr_t>(ao);
+        }
+      }
+    }
+  } // namespace detail
+
   template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
   auto Any::lookup_impl(Self& self, std::u8string_view member) noexcept
   {
-    if (self.is_empty())
-      return nullptr;
-
-    auto name = stdcolt_ext_rt_StringView{
-        reinterpret_cast<const char*>(member.data()), member.size()};
-
-    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()), KIND);
-    if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
-      return nullptr;
-
-    if
-      auto base = static_cast<const char*>(self.base_address());
-    auto addr = base + res.data.found.address_or_offset;
-
-    using Ptr = std::conditional_t<std::is_const_v<Self>, const T*, T*>;
-    return reinterpret_cast<Ptr>(const_cast<char*>(addr));
+    return detail::lookup_member<T, LookupFn, KIND>(self, member);
   }
 
   template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
   auto SharedAny::lookup_impl(Self& self, std::u8string_view member) noexcept
   {
-    if (self.is_empty())
-      return nullptr;
-
-    auto name = stdcolt_ext_rt_StringView{
-        reinterpret_cast<const char*>(member.data()), member.size()};
-
-    auto res = LookupFn(self.type(), &name, type_of<T>(self.context()), KIND);
-    if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
-      return nullptr;
-
-    auto base = static_cast<const char*>(self.base_address());
-    auto addr = base + res.data.found.address_or_offset;
-
-    using Ptr = std::conditional_t<std::is_const_v<Self>, const T*, T*>;
-    return reinterpret_cast<Ptr>(const_cast<char*>(addr));
+    return detail::lookup_member<T, LookupFn, KIND>(self, member);
   }
 } // namespace stdcolt::ext::rt
 
