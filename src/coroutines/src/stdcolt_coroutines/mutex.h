@@ -260,10 +260,6 @@ namespace stdcolt::coroutines
       return guard_awaiter{*this};
     }
   };
-
-  class AsyncMutexShared
-  {
-  };
 } // namespace stdcolt::coroutines
 
 #endif // !__HG_STDCOLT_COROUTINES_MUTEX
