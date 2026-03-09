@@ -20,6 +20,8 @@ namespace stdcolt::alloc
 {
   Block Mallocator::allocate(Layout request) const noexcept
   {
+    if (request.size() == 0)
+      return nullblock;
     if (request.align() > PREFERRED_ALIGNMENT)
       return nullblock;
     return {std::malloc(request.size()), request.size()};
@@ -32,6 +34,8 @@ namespace stdcolt::alloc
 
   static void* aligned_malloc(size_t size, size_t alignment)
   {
+    if (size == 0)
+      return nullptr;
     if (alignment < PREFERRED_ALIGNMENT)
       alignment = PREFERRED_ALIGNMENT;
 
