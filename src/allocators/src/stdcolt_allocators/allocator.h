@@ -191,6 +191,60 @@ namespace stdcolt::alloc
   {
     return a > b ? a : b;
   }
+
+  /// @brief Reference to an allocator
+  /// @tparam ALLOCATOR The allocator type referred to
+  template<IsAllocator ALLOCATOR>
+  class AllocatorRef
+  {
+    ALLOCATOR* _allocator;
+
+  public:
+    static constexpr AllocatorInfo allocator_info = ALLOCATOR::allocator_info;
+
+    constexpr AllocatorRef(ALLOCATOR& allocator) noexcept
+        : _allocator(&allocator)
+    {
+    }
+
+    Block allocate(Layout request) noexcept(is_allocate_nothrow_v<ALLOCATOR>)
+    {
+      return _allocator->allocate(request);
+    }
+
+    void deallocate(Block blk) noexcept { _allocator->deallocate(blk); }
+
+    bool owns(Block blk) const noexcept
+      requires IsOwningAllocator<ALLOCATOR>
+    {
+      return _allocator->owns(blk);
+    }
+  };
+
+  /// @brief Reference to a global allocator
+  /// @tparam INSTANCE The address of the global allocator
+  template<auto INSTANCE>
+  class AllocatorGlobalRef
+  {
+    using ALLOCATOR = std::remove_pointer_t<decltype(INSTANCE)>;
+    static_assert(IsAllocator<ALLOCATOR>);
+
+  public:
+    static constexpr AllocatorInfo allocator_info = ALLOCATOR::allocator_info;
+
+    Block allocate(Layout request) noexcept(is_allocate_nothrow_v<ALLOCATOR>)
+    {
+      return INSTANCE->allocate(request);
+    }
+
+    void deallocate(Block blk) noexcept { INSTANCE->deallocate(blk); }
+
+    bool owns(Block blk) const noexcept
+      requires IsOwningAllocator<ALLOCATOR>
+    {
+      return INSTANCE->owns(blk);
+    }
+  };
 } // namespace stdcolt::alloc
 
 #endif // !__HG_STDCOLT_ALLOCATORS_ALLOCATOR
