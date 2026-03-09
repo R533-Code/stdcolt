@@ -83,6 +83,7 @@ namespace stdcolt::alloc
         : _size(size)
         , _align(align)
     {
+      STDCOLT_debug_pre(is_power_of_2(align) && align != 0, "invalid alignment!");
     }
 
     constexpr Layout(Layout&&) noexcept                 = default;
@@ -166,6 +167,30 @@ namespace stdcolt::alloc
       void handle_alloc_fail(
           Layout size, const std::source_location& loc =
                            STDCOLT_CURRENT_SOURCE_LOCATION) noexcept;
+
+  /// @brief Returns the minimum of two values
+  /// @tparam T The type of the values
+  /// @param a First argument
+  /// @param b Second argument
+  /// @return The minimum of a and b
+  template<typename T>
+  constexpr T min_of(const T& a, const T& b) noexcept(
+      noexcept(std::declval<T> < std::declval<T>))
+  {
+    return a < b ? a : b;
+  }
+
+  /// @brief Returns the maximum of two values
+  /// @tparam T The type of the values
+  /// @param a First argument
+  /// @param b Second argument
+  /// @return The maximum of a and b
+  template<typename T>
+  constexpr T max_of(const T& a, const T& b) noexcept(
+      noexcept(std::declval<T> > std::declval<T>))
+  {
+    return a > b ? a : b;
+  }
 } // namespace stdcolt::alloc
 
 #endif // !__HG_STDCOLT_ALLOCATORS_ALLOCATOR
