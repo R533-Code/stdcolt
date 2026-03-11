@@ -49,7 +49,7 @@ namespace stdcolt::alloc
         // returns nullblock on failure
         Block blk = ALLOCATOR::allocate(request);
         if (blk == nullblock)
-          handle_alloc_fail(request, loc);
+          handle_alloc_fail(request);
         return blk;
       }
       else
@@ -61,7 +61,7 @@ namespace stdcolt::alloc
         }
         catch (...)
         {
-          handle_alloc_fail(request, loc);
+          handle_alloc_fail(request);
         }
       }
     }
