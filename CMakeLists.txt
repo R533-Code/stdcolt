@@ -42,12 +42,16 @@ option(STDCOLT_BUILD_PYTHON_BINDINGS
     "Set to true to build python bindings of the C++ code"
     ${PROJECT_IS_TOP_LEVEL}
 )
-option(STDCOLT_ENABLE_TESTS 
-    "Set to true to build the tests of the C++ library" 
+option(STDCOLT_BUILD_TRACY_PROFILER
+    "Set to true to build the tracy UI profiler"
+    OFF
+)
+option(STDCOLT_ENABLE_TESTS
+    "Set to true to build the tests of the C++ library"
     ${PROJECT_IS_TOP_LEVEL}
 )
-option(STDCOLT_ENABLE_BENCHMARK 
-    "Set to true to build the benchmarks of the C++ library" 
+option(STDCOLT_ENABLE_BENCHMARK
+    "Set to true to build the benchmarks of the C++ library"
     ${PROJECT_IS_TOP_LEVEL}
 )
 
@@ -62,14 +66,14 @@ endif()
 # ###########################
 # Setup C++ testing framework
 # ###########################
-if (STDCOLT_ENABLE_TESTS)
+if(STDCOLT_ENABLE_TESTS)
     ec_add_subdirectory_static("3rd_party/doctest")
 endif()
 
 # ###########################
 # Setup benchmark framework
 # ###########################
-if (STDCOLT_ENABLE_BENCHMARK)
+if(STDCOLT_ENABLE_BENCHMARK)
     ec_add_subdirectory_static("3rd_party/nanobench")
 endif()
 
