@@ -13,7 +13,7 @@ if(${STDCOLT_ENABLE_TRACING})
         "3rd_party/tracy/public/tracy"
     )
     target_compile_definitions(${_tracing} PUBLIC STDCOLT_ENABLE_TRACING TRACY_ENABLE)
-    target_link_directories(${_tracing} PUBLIC Tracy::TracyClient)
+    target_link_libraries(${_tracing} PUBLIC Tracy::TracyClient)
 else()
     message(STATUS "Skipping library 'Tracy'. Set STDCOLT_ENABLE_TRACING to ON to enable tracing.")
 endif()
