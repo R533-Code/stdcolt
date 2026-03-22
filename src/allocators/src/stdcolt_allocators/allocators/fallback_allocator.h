@@ -38,6 +38,13 @@ namespace stdcolt::alloc
             PRIMARY::allocator_info.alignment, SECONDARY::allocator_info.alignment),
     };
 
+    template<typename... Args>
+    FallbackAllocator(Args&&... args)
+        : PRIMARY(std::forward<Args>(args)...)
+        , SECONDARY()
+    {
+    }
+
     Block allocate(Layout request) noexcept(
         !allocator_info.is_fallible || allocator_info.is_nothrow_fallible)
     {

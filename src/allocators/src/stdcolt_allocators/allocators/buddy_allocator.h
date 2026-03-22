@@ -10,6 +10,7 @@
 
 #include <limits>
 #include <mutex>
+#include <bit>
 #include <stdcolt_allocators/block.h>
 #include <stdcolt_allocators/allocator.h>
 
@@ -43,8 +44,6 @@ namespace stdcolt::alloc
 
     static constexpr size_t BITMAP_BITS  = SIZE / MIN_BLOCK;
     static constexpr size_t BITMAP_WORDS = (BITMAP_BITS + 63) / 64;
-
-    // --- Compile-time helpers ---
 
     static constexpr size_t block_size_at(size_t l) noexcept
     {

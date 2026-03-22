@@ -207,12 +207,12 @@ namespace stdcolt::alloc
     {
     }
 
-    Block allocate(Layout request) noexcept(is_allocate_nothrow_v<ALLOCATOR>)
+    Block allocate(Layout request) const noexcept(is_allocate_nothrow_v<ALLOCATOR>)
     {
       return _allocator->allocate(request);
     }
 
-    void deallocate(Block blk) noexcept { _allocator->deallocate(blk); }
+    void deallocate(Block blk) const noexcept { _allocator->deallocate(blk); }
 
     bool owns(Block blk) const noexcept
       requires IsOwningAllocator<ALLOCATOR>
@@ -232,12 +232,12 @@ namespace stdcolt::alloc
   public:
     static constexpr AllocatorInfo allocator_info = ALLOCATOR::allocator_info;
 
-    Block allocate(Layout request) noexcept(is_allocate_nothrow_v<ALLOCATOR>)
+    Block allocate(Layout request) const noexcept(is_allocate_nothrow_v<ALLOCATOR>)
     {
       return INSTANCE->allocate(request);
     }
 
-    void deallocate(Block blk) noexcept { INSTANCE->deallocate(blk); }
+    void deallocate(Block blk) const noexcept { INSTANCE->deallocate(blk); }
 
     bool owns(Block blk) const noexcept
       requires IsOwningAllocator<ALLOCATOR>
