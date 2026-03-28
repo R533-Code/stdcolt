@@ -42,10 +42,6 @@ option(STDCOLT_BUILD_PYTHON_BINDINGS
     "Set to true to build python bindings of the C++ code"
     ${PROJECT_IS_TOP_LEVEL}
 )
-option(STDCOLT_BUILD_TRACY_PROFILER
-    "Set to true to build the tracy UI profiler"
-    OFF
-)
 option(STDCOLT_ENABLE_TESTS
     "Set to true to build the tests of the C++ library"
     ${PROJECT_IS_TOP_LEVEL}

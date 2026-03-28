@@ -1,3 +1,4 @@
+include(ExternalProject)
 option(STDCOLT_ENABLE_TRACING
     "Enable tracing of stdcolt"
     ON
@@ -16,11 +17,4 @@ if(${STDCOLT_ENABLE_TRACING})
     target_link_libraries(${_tracing} PUBLIC Tracy::TracyClient)
 else()
     message(STATUS "Skipping library 'Tracy'. Set STDCOLT_ENABLE_TRACING to ON to enable tracing.")
-endif()
-
-if(${STDCOLT_BUILD_TRACY_PROFILER})
-    message(STATUS "Build of 'tracy-profiler' is enabled.")
-    ec_add_subdirectory("3rd_party/tracy/profiler")
-else()
-    message(STATUS "Skipping build of 'tracy-profiler'. Set STDCOLT_BUILD_TRACY_PROFILER to ON to build it.")
 endif()
