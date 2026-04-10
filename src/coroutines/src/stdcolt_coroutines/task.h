@@ -371,22 +371,13 @@ namespace stdcolt::coroutines
 
     decltype(auto) result() &
     {
-      STDCOLT_pre(handle, "Task was empty");
-      STDCOLT_pre(is_ready(), "Task not ready yet");
-      if constexpr (std::is_void_v<T>)
-        handle.promise().result();
-      else
-        return (handle.promise().result());
+      STDCOLT_pre(handle && is_ready(), "task is empty or not ready");
+      return handle.promise().result();
     }
-
     decltype(auto) result() &&
     {
-      STDCOLT_pre(handle, "Task was empty");
-      STDCOLT_pre(is_ready(), "Task not ready yet");
-      if constexpr (std::is_void_v<T>)
-        (std::move(handle.promise()).result());
-      else
-        return (std::move(handle.promise()).result());
+      STDCOLT_pre(handle && is_ready(), "task is empty or not ready");
+      return std::move(handle.promise()).result();
     }
   };
 

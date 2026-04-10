@@ -3,7 +3,7 @@
 #include <stdcolt_coroutines/task.h>
 #include <stdcolt_coroutines/generator.h>
 #include <stdcolt_coroutines/synchronization/flag.h>
-#include <stdcolt_coroutines/mutex.h>
+#include <stdcolt_coroutines/synchronization/mutex.h>
 
 #include <atomic>
 #include <stdexcept>

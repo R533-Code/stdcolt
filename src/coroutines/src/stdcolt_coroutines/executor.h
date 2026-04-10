@@ -19,7 +19,7 @@
 #include <type_traits>
 #include <stdcolt_contracts/contracts.h>
 #include <stdcolt_coroutines/task.h>
-#include <stdcolt_coroutines/atomic_coroutine_handle.h>
+#include <stdcolt_coroutines/synchronization/atomic_coroutine_handle.h>
 #include <stdcolt_coroutines_export.h>
 #include <memory>
 
