@@ -159,8 +159,6 @@ namespace stdcolt::coroutines
         bool await_suspend(handle h) noexcept
         {
           awaiting = h;
-          armed.store(0, std::memory_order_relaxed);
-
           // post a work item that will resume the awaiting coroutine.
           // if posting failed, do NOT suspend, continue running inline.
           status = ex->post(Executor::WorkItem{&awaiter::run, this});
@@ -234,7 +232,6 @@ namespace stdcolt::coroutines
         bool await_suspend(handle h) noexcept
         {
           awaiting = h;
-          armed.store(0, std::memory_order_relaxed);
 
           if (post_status == PostStatus::POST_SUCCESS)
             post_status = ex->post(Executor::WorkItem{&awaiter::run, this}, when);
@@ -317,16 +314,27 @@ namespace stdcolt::coroutines
     /// @param aw The awaitable
     /// @return The executor post status
     template<typename Awaitable>
-    Executor::PostStatus spawn(Awaitable&& aw)
+    Executor::PostStatus spawn(Awaitable&& aw) noexcept
     {
+      detached_task dt;
+      try
+      {
+        dt = make_detached(std::forward<Awaitable>(aw));
+      }
+      catch (...)
+      {
+        // Coroutine frame allocation or awaitable move/copy failed.
+        // Nothing to account for: we never touched _pending.
+        return Executor::PostStatus::POST_FAIL_MEMORY;
+      }
+
+      auto h            = dt.handle;
+      h.promise().scope = this;
+
+      // Account for the in-flight task only once we are committed to posting.
       _pending.fetch_add(1, std::memory_order_relaxed);
 
-      detached_task dt  = make_detached(std::forward<Awaitable>(aw));
-      auto h            = dt.handle;
-      h.promise().scope = this; // set scope to this
-
-      // post onto executor.
-      auto ps = _executor.post(Executor::WorkItem{
+      const auto ps = _executor.post(Executor::WorkItem{
           &detached_task::promise_type::resume_callback, &h.promise()});
 
       if (ps != Executor::PostStatus::POST_SUCCESS)

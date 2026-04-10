@@ -335,8 +335,28 @@ namespace stdcolt::coroutines
 
       for (;;)
       {
-        if (_timer_state.load(std::memory_order_acquire) != 0 && _scheduled.empty())
+        if (_timer_state.load(std::memory_order_acquire) != 0)
+        {
+          // Drain: fire everything immediately so _outstanding reaches 0
+          // and the underlying ThreadPoolExecutor::stop() can join workers.
+          while (!_scheduled.empty())
+          {
+            ScheduledItem item = _scheduled.top();
+            _scheduled.pop();
+
+            lk.unlock();
+            consume_one_scheduled();
+
+            if (item.item.run != nullptr)
+            {
+              const auto ps = ThreadPoolExecutor::post(item.item);
+              if (ps != PostStatus::POST_SUCCESS)
+                item.item.run(item.item.ctx); // noexcept fallback
+            }
+            lk.lock();
+          }
           break;
+        }
 
         if (_scheduled.empty())
         {
