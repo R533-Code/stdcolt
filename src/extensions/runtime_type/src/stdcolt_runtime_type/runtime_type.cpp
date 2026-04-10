@@ -367,7 +367,7 @@ extern "C" ResultRuntimeContext stdcolt_ext_rt_create(
 
   alloc::Block state = alloc::MallocatorAligned{}.allocate(
       alloc::Layout{alloc_recipe.allocator_sizeof, alloc_recipe.allocator_alignof});
-  if (state == alloc::nullblock)
+  if (alloc_recipe.allocator_sizeof && state == alloc::nullblock)
   {
     delete ctx;
     return result_rc_fail_mem();
