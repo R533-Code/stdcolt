@@ -13,7 +13,7 @@ ec_add_library_dynamic(simd OUT _simd
     NO_CONFORMANT_PREPROCESSOR_MSVC
 )
 
-target_include_directories(${_simd} PUBLIC "3rd_party/libsimdpp")
+target_include_directories(${_simd} PRIVATE "3rd_party/libsimdpp")
 # fix sources of simd target:
 target_sources(${_simd} PRIVATE ${STDCOLT_SIMD_OBJS})
 
