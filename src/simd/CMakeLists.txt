@@ -1,5 +1,4 @@
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5 CACHE STRING "" FORCE)
-ec_add_subdirectory("3rd_party/libsimdpp")
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/3rd_party/libsimdpp/cmake")
 include(SimdppMultiarch)
 
