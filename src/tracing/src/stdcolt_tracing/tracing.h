@@ -26,7 +26,7 @@
   ///     print_token(i, value);
   /// }; // <- do not forget the semicolon!
   /// @endcode
-  #define STDCOLT_TRACE_BLOCK(name) ZoneNamedN(, name, true)
+  #define STDCOLT_TRACE_BLOCK(name) ZoneScopedN(name)
   /// @brief Traces a block (which is named) (with color, 0xRRGGBB)
   /// @code{.cpp}
   /// {
@@ -35,7 +35,7 @@
   ///     lng::print_token(i, value);
   /// }
   /// @endcode
-  #define STDCOLT_TRACE_BLOCK_C(name, color) ZoneNamedNC(, name, color, true)
+  #define STDCOLT_TRACE_BLOCK_C(name, color) ZoneScopedNC(name, color)
   /// @brief Traces a single expression
   #define STDCOLT_TRACE_EXPR(expr) \
     [&]() -> decltype(auto)        \
@@ -106,6 +106,6 @@ namespace stdcolt
   /// @brief Forces shutdown of the tracy profiler.
   /// This function waits for all the data to be transferred before returning.
   void shutdown_tracer() noexcept;
-} // namespace lars
+} // namespace stdcolt
 
 #endif // !__HG_STDCOLT_TRACING_TRACING
