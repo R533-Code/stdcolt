@@ -2,14 +2,14 @@
  * @file   block.h
  * @brief  Contains `Block`, the allocation unit of all allocators.
  * 
- * @author RPC
+ * @author Raphael Dib Nehme
  * @date   November 2025
  *********************************************************************/
 #ifndef __HG_STDCOLT_ALLOCATORS_BLOCK
 #define __HG_STDCOLT_ALLOCATORS_BLOCK
 
-#include <cstdint>
-#include <tuple>
+#include <stdint.h>
+#include <stddef.h>
 #include <utility>
 
 namespace stdcolt::alloc
