@@ -5,13 +5,8 @@
 
 #include <simdpp/simd.h>
 
-#if defined(_MSC_VER)
-  #include <simdpp/dispatch/get_arch_raw_cpuid.h>
-  #define SIMDPP_USER_ARCH_INFO ::simdpp::get_arch_raw_cpuid()
-#else
-  #include <simdpp/dispatch/get_arch_gcc_builtin_cpu_supports.h>
-  #define SIMDPP_USER_ARCH_INFO ::simdpp::get_arch_gcc_builtin_cpu_supports()
-#endif
+#include <simdpp/dispatch/get_arch_raw_cpuid.h>
+#define SIMDPP_USER_ARCH_INFO ::simdpp::get_arch_raw_cpuid()
 
 #define STDCOLT_DEFINE_SIMD_BINARY_OP(                               \
     FUNCNAME, TYPE, VSIZE, VTYPE, SIMD_OP, CPP_OP)                   \
