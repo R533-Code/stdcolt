@@ -9,7 +9,9 @@
 
 #include <type_traits>
 #include <utility>
+#include <functional>
 #include <stdcolt_contracts/contracts.h>
+#include <cstdlib>
 
 namespace stdcolt
 {
