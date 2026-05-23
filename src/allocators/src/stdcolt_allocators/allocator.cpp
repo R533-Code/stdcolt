@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdio>
 #include <cinttypes>
+#include <cstdlib>
 
 namespace stdcolt::alloc
 {
