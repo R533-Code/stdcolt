@@ -73,13 +73,13 @@ namespace stdcolt::alloc
 
     size_t block_index(const void* ptr, size_t l) const noexcept
     {
-      return (static_cast<const char*>(ptr) - static_cast<const char*>(_slab.ptr()))
+      return (reinterpret_cast<const char*>(ptr) - reinterpret_cast<const char*>(_slab.ptr()))
              / block_size_at(l);
     }
 
     void* buddy_of(void* ptr, size_t l) const noexcept
     {
-      return static_cast<char*>(_slab.ptr())
+      return (char*)(_slab.ptr())
              + (block_index(ptr, l) ^ size_t(1)) * block_size_at(l);
     }
 

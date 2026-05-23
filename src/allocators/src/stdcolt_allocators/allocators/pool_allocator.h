@@ -126,8 +126,8 @@ namespace stdcolt::alloc
     {
       if (_slab == nullblock)
         return false;
-      auto* p     = static_cast<char*>(blk.ptr());
-      auto* start = static_cast<char*>(_slab.ptr());
+      auto* p     = reinterpret_cast<const char*>(blk.ptr());
+      auto* start = reinterpret_cast<const char*>(_slab.ptr());
       return p >= start && p < start + ACTUAL_BLOCK_SIZE * BLOCK_COUNT;
     }
   };
@@ -276,8 +276,8 @@ namespace stdcolt::alloc
     {
       if (_slab == nullblock)
         return false;
-      auto* p     = static_cast<char*>(blk.ptr());
-      auto* start = static_cast<char*>(_slab.ptr());
+      auto* p     = reinterpret_cast<const char*>(blk.ptr());
+      auto* start = reinterpret_cast<const char*>(_slab.ptr());
       return p >= start && p < start + ACTUAL_BLOCK_SIZE * BLOCK_COUNT;
     }
   };
