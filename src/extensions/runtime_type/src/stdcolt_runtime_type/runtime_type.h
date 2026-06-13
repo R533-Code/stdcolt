@@ -887,6 +887,14 @@ extern "C"
   } stdcolt_ext_rt_WeakAny;
 
   STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs an empty `WeakAny`.
+  /// Empty values do not need to be destroyed.
+  /// This is guaranteed to not allocate, and always succeed.
+  /// @param out The value to initialize
+  /// @pre No parameter may be null, else UB!
+  void stdcolt_ext_rt_wany_construct_empty(stdcolt_ext_rt_WeakAny* out);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Constructs a `WeakAny` from a `SharedAny`.
   /// If an empty `SharedAny` is passed, an empty `WeakAny` is returned.
   /// @param out The value to initialize

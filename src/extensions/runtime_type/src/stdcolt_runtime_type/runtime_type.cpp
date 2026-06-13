@@ -1982,6 +1982,13 @@ extern "C" void stdcolt_ext_rt_sany_destroy(stdcolt_ext_rt_SharedAny* val)
   stdcolt_ext_rt_sany_construct_empty(val);
 }
 
+extern "C" void stdcolt_ext_rt_wany_construct_empty(stdcolt_ext_rt_WeakAny* out)
+{
+  STDCOLT_pre(out != nullptr, "expected non-null parameter");
+  out->address       = nullptr;
+  out->control_block = nullptr;
+}
+
 extern "C" void stdcolt_ext_rt_wany_from_sany(
     stdcolt_ext_rt_WeakAny* out, const stdcolt_ext_rt_SharedAny* val)
 {
