@@ -16,9 +16,9 @@ struct CxxBindingBasicPOD
 
 TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
 {
-  auto ctx_res = stdcolt_ext_rt_create(nullptr, nullptr);
-  REQUIRE(ctx_res.result == STDCOLT_EXT_RT_CTX_SUCCESS);
-  auto ctx = ctx_res.data.success.context;
+  auto ctx_res = RuntimeContext::make();
+  REQUIRE(ctx_res.has_value());
+  auto& ctx = *ctx_res;
 
   SUBCASE("empty checks")
   {
@@ -43,7 +43,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(val_res1.has_value());
     auto& val = *val_res1;
     REQUIRE(val.is_empty() == false);
-    REQUIRE(val.context() == ctx);
+    REQUIRE(val.context().has_value());
+    REQUIRE(val.context()->c_handle() == ctx.c_handle());
     REQUIRE(val.type() == type_of<uint32_t>(ctx));
     REQUIRE(val.reflect_name() == u8"");
 
@@ -77,7 +78,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(val_res1.has_value());
     auto& val = *val_res1;
     REQUIRE(val.is_empty() == false);
-    REQUIRE(val.context() == ctx);
+    REQUIRE(val.context().has_value());
+    REQUIRE(val.context()->c_handle() == ctx.c_handle());
     REQUIRE(val.type() == type_of<char[sizeof(STR)]>(ctx));
     REQUIRE(val.reflect_name() == u8"");
 
@@ -111,9 +113,9 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     REQUIRE(_CxxBindingBasicPOD.result == STDCOLT_EXT_RT_TYPE_SUCCESS);
     auto type = type_of<CxxBindingBasicPOD>(ctx);
     REQUIRE(_CxxBindingBasicPOD.data.success.type == type);
-    REQUIRE(type->trivial_copyable);
-    REQUIRE(type->trivial_movable);
-    REQUIRE(type->trivial_destroy);
+    REQUIRE(type.is_trivially_copyable());
+    REQUIRE(type.is_trivially_movable());
+    REQUIRE(type.is_trivially_destructible());
 
     auto val_res = Any::make_in_place<CxxBindingBasicPOD>(ctx, 1, 0.2, 3, 4);
     REQUIRE(val_res.has_value());
@@ -141,18 +143,16 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings")
     for (auto [name, desc, type, kind, _] : val.reflect())
     {
       REQUIRE(name.size() == 1);
-      REQUIRE(type->kind == STDCOLT_EXT_RT_TYPE_KIND_BUILTIN);
+      REQUIRE(type.kind() == STDCOLT_EXT_RT_TYPE_KIND_BUILTIN);
     }
   }
-
-  stdcolt_ext_rt_destroy(ctx);
 }
 
 TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
 {
-  auto ctx_res = stdcolt_ext_rt_create(nullptr, nullptr);
-  REQUIRE(ctx_res.result == STDCOLT_EXT_RT_CTX_SUCCESS);
-  auto ctx = ctx_res.data.success.context;
+  auto ctx_res = RuntimeContext::make();
+  REQUIRE(ctx_res.has_value());
+  auto& ctx = *ctx_res;
 
   // Reuse the same bound type from your Any tests (needed for reflect_name on named types)
   auto _CxxBindingBasicPOD = bind_type<CxxBindingBasicPOD>(
@@ -170,7 +170,7 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
     SharedAny s{};
     REQUIRE(s.is_empty());
     REQUIRE(s.type() == nullptr);
-    REQUIRE(s.context() == nullptr);
+    REQUIRE(!s.context().has_value());
     REQUIRE(s.as_type<int>() == nullptr);
     REQUIRE(s.is_type<int>() == false);
 
@@ -187,7 +187,8 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
     auto s1 = std::move(*s_res);
 
     REQUIRE(!s1.is_empty());
-    REQUIRE(s1.context() == ctx);
+    REQUIRE(s1.context().has_value());
+    REQUIRE(s1.context()->c_handle() == ctx.c_handle());
     REQUIRE(s1.type() == type_of<uint32_t>(ctx));
 
     auto p1 = s1.as_type<uint32_t>();
@@ -337,6 +338,4 @@ TEST_CASE("stdcolt/extensions/runtime_type: C++ bindings (SharedAny/WeakAny)")
     REQUIRE(bound2.base_address() == s.base_address());
     REQUIRE(bound2(10.0, 0.0) == 0.2);
   }
-
-  stdcolt_ext_rt_destroy(ctx);
 }

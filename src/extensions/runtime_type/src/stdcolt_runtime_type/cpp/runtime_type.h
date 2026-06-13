@@ -100,85 +100,6 @@ namespace stdcolt::ext::rt
     constexpr operator bool() const noexcept { return !is_empty(); }
   };
 
-  /// @brief Member kind
-  enum class MemberKind : uint8_t
-  {
-    /// @brief Non-static data field
-    MEMBER_FIELD = STDCOLT_EXT_RT_MEMBER_FIELD,
-    /// @brief Static data field
-    MEMBER_STATIC_FIELD = STDCOLT_EXT_RT_MEMBER_STATIC_FIELD,
-    /// @brief Non-static method
-    MEMBER_METHOD = STDCOLT_EXT_RT_MEMBER_METHOD,
-  };
-
-  /// @brief Reflect member information
-  struct ReflectedMember
-  {
-    /// @brief The name of the member
-    std::u8string_view name;
-    /// @brief The description of the member
-    std::u8string_view description;
-    /// @brief The type of the member
-    Type type;
-    /// @brief The member kind
-    MemberKind kind;
-    /// @brief The address or offset of the member
-    uintptr_t address_or_offset;
-  };
-
-  /// @brief Iterator over the reflected members of a type
-  class reflection_iter
-  {
-    stdcolt_ext_rt_ReflectIterator* _iter = nullptr;
-
-  public:
-    /// @brief Constructs an end `reflection_iter`
-    reflection_iter() noexcept = default;
-    /// @brief Constructs a begin `reflection_iter` from a typ
-    /// @param type The type or null
-    reflection_iter(Type type) noexcept
-        : _iter(stdcolt_ext_rt_reflect_create(type))
-    {
-      // advances the iterator so that the first read is valid
-      _iter = stdcolt_ext_rt_reflect_advance(_iter);
-    }
-    /// @brief Destructor
-    ~reflection_iter() noexcept
-    {
-      if (_iter)
-        stdcolt_ext_rt_reflect_destroy(_iter);
-    }
-    reflection_iter(reflection_iter&&) noexcept            = default;
-    reflection_iter& operator=(reflection_iter&&) noexcept = default;
-    reflection_iter(const reflection_iter&)                = delete;
-    reflection_iter& operator=(const reflection_iter&)     = delete;
-
-    /// @brief Advances the iterator
-    /// @return Self
-    reflection_iter& operator++() noexcept
-    {
-      _iter = stdcolt_ext_rt_reflect_advance(_iter);
-      return *this;
-    }
-
-    /// @brief Returns the reflected member
-    /// @return ReflectedMember
-    ReflectedMember operator*() const noexcept
-    {
-      STDCOLT_pre(_iter != nullptr, "dereferencing invalid iterator!");
-      auto member = stdcolt_ext_rt_reflect_read(_iter);
-      return {
-          {(const char8_t*)member.name.data, member.name.size},
-          {(const char8_t*)member.description.data, member.description.size},
-          member.type,
-          (MemberKind)member.kind,
-          member.address_or_offset};
-    }
-
-    bool operator==(const reflection_iter&) const noexcept = default;
-    bool operator!=(const reflection_iter&) const noexcept = default;
-  };
-
   /// @brief Any that may contain any type.
   /// This is a wrapper over the stable C API.
   class Any
@@ -231,19 +152,21 @@ namespace stdcolt::ext::rt
     /// @return A value or nullopt on errors
     template<typename T, typename... Ts>
     static std::optional<Any> make_in_place(
-        RuntimeContext* ctx, Ts&&... args) noexcept;
+        RuntimeContextView ctx, Ts&&... args) noexcept;
 
     /// @brief Check if the value is empty
     /// @return True if the value is empty
     bool is_empty() const noexcept { return _value.header.type == nullptr; }
     /// @brief Returns the type of the Any, or nullptr for empty values
     /// @return The type or nullptr for empty values
-    Type type() const noexcept { return _value.header.type; }
-    /// @brief Returns the context of the Any, or nullptr for empty values
-    /// @return The context or nullptr for empty values
-    RuntimeContext* context() const noexcept
+    TypeView type() const noexcept { return _value.header.type; }
+    /// @brief Returns the context of the Any, or nullopt for empty values
+    /// @return The context or nullopt for empty values
+    std::optional<RuntimeContextView> context() const noexcept
     {
-      return is_empty() ? nullptr : type()->owner;
+      if (is_empty())
+        return std::nullopt;
+      return type().owner();
     }
     /// @brief Base address of the object stored or nullptr if empty
     /// @return Base address or nullptr
@@ -270,7 +193,7 @@ namespace stdcolt::ext::rt
     bool is_type() const noexcept
     {
       auto ctx = context();
-      return ctx == nullptr ? false : type_of<T>(ctx) == type();
+      return ctx.has_value() ? type_of<T>(*ctx) == type() : false;
     }
     /// @brief Cast the value to a pointer of a specific type.
     /// @tparam T The type to cast the value to
@@ -305,16 +228,16 @@ namespace stdcolt::ext::rt
     template<typename T>
     std::span<const T> as_span() const noexcept
     {
-      auto t = type();
-      if (t == nullptr)
+      TypeView t = type();
+      if (!t)
         return {};
-      if (t->kind == STDCOLT_EXT_RT_TYPE_KIND_ARRAY)
+      if (t.is_array())
       {
-        if (t->info.kind_array.array_type == type_of<T>(t->owner))
-          return {(T*)base_address(), t->info.kind_array.size};
+        if (t.element_type() == type_of<T>(t.owner()))
+          return {(const T*)base_address(), t.array_length()};
         return {};
       }
-      if (t == type_of<T>(t->owner))
+      if (t == type_of<T>(t.owner()))
         return {(const T*)base_address(), 1};
       return {};
     }
@@ -392,39 +315,25 @@ namespace stdcolt::ext::rt
 
     /// @brief Returns an iterator over the reflected members of the type of the Any.
     /// @return Begin iterator over the reflected members of the current type
-    reflection_iter reflect_begin() const noexcept
+    TypeReflectionIterator reflect_begin() const noexcept
     {
-      return reflection_iter(type());
+      return type().reflect_begin();
     }
     /// @brief Returns an iterator over the reflected members of the type of the Any.
     /// @return End iterator over the reflected members of the current type
-    reflection_iter reflect_end() const noexcept { return reflection_iter(); }
+    TypeReflectionIterator reflect_end() const noexcept
+    {
+      return type().reflect_end();
+    }
     /// @brief Returns an object with `begin` and `end` methods to reflect
     /// on the members of a type.
     /// @return Object with `begin` and `end` for reflection
-    auto reflect() const noexcept
-    {
-      struct reflector
-      {
-        Type reflected_type;
-
-        reflection_iter begin() const noexcept
-        {
-          return reflection_iter(reflected_type);
-        }
-        reflection_iter end() const noexcept { return reflection_iter(); }
-      };
-      return reflector{type()};
-    }
+    TypeReflector reflect() const noexcept { return type().reflect(); }
     /// @brief Returns the name of type if it is named
     /// @return Name of the type for named type or an empty string view
     std::u8string_view reflect_name() const noexcept
     {
-      auto _type = type();
-      if (_type == nullptr || _type->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
-        return {};
-      auto ret = stdcolt_ext_rt_reflect_name(_type);
-      return {(const char8_t*)ret.data, ret.size};
+      return type().is_named() ? type().name() : u8"";
     }
   };
 
@@ -471,14 +380,18 @@ namespace stdcolt::ext::rt
 
     template<typename T, typename... Ts>
     static std::optional<SharedAny> make_in_place(
-        RuntimeContext* ctx, Ts&&... args) noexcept;
+        RuntimeContextView ctx, Ts&&... args) noexcept;
 
     bool is_empty() const noexcept { return _value.header.type == nullptr; }
-    Type type() const noexcept { return _value.header.type; }
+    TypeView type() const noexcept { return _value.header.type; }
 
-    RuntimeContext* context() const noexcept
+    /// @brief Returns the context of the Any, or nullopt for empty values
+    /// @return The context or nullopt for empty values
+    std::optional<RuntimeContextView> context() const noexcept
     {
-      return is_empty() ? nullptr : type()->owner;
+      if (is_empty())
+        return std::nullopt;
+      return type().owner();
     }
 
     void* base_address() noexcept { return _value.header.address; }
@@ -497,7 +410,7 @@ namespace stdcolt::ext::rt
     bool is_type() const noexcept
     {
       auto ctx = context();
-      return ctx == nullptr ? false : type_of<T>(ctx) == type();
+      return ctx.has_value() ? type_of<T>(*ctx) == type() : false;
     }
 
     template<typename T>
@@ -521,16 +434,16 @@ namespace stdcolt::ext::rt
     template<typename T>
     std::span<const T> as_span() const noexcept
     {
-      auto t = type();
-      if (t == nullptr)
+      TypeView t = type();
+      if (!t)
         return {};
-      if (t->kind == STDCOLT_EXT_RT_TYPE_KIND_ARRAY)
+      if (t.is_array())
       {
-        if (t->info.kind_array.array_type == type_of<T>(t->owner))
-          return {(const T*)base_address(), t->info.kind_array.size};
+        if (t.element_type() == type_of<T>(t.owner()))
+          return {(const T*)base_address(), t.array_length()};
         return {};
       }
-      if (t == type_of<T>(t->owner))
+      if (t == type_of<T>(t.owner()))
         return {(const T*)base_address(), 1};
       return {};
     }
@@ -559,39 +472,25 @@ namespace stdcolt::ext::rt
 
     /// @brief Returns an iterator over the reflected members of the type of the Any.
     /// @return Begin iterator over the reflected members of the current type
-    reflection_iter reflect_begin() const noexcept
+    TypeReflectionIterator reflect_begin() const noexcept
     {
-      return reflection_iter(type());
+      return type().reflect_begin();
     }
     /// @brief Returns an iterator over the reflected members of the type of the Any.
     /// @return End iterator over the reflected members of the current type
-    reflection_iter reflect_end() const noexcept { return reflection_iter(); }
+    TypeReflectionIterator reflect_end() const noexcept
+    {
+      return type().reflect_end();
+    }
     /// @brief Returns an object with `begin` and `end` methods to reflect
     /// on the members of a type.
     /// @return Object with `begin` and `end` for reflection
-    auto reflect() const noexcept
-    {
-      struct reflector
-      {
-        Type reflected_type;
-
-        reflection_iter begin() const noexcept
-        {
-          return reflection_iter(reflected_type);
-        }
-        reflection_iter end() const noexcept { return reflection_iter(); }
-      };
-      return reflector{type()};
-    }
+    TypeReflector reflect() const noexcept { return type().reflect(); }
     /// @brief Returns the name of type if it is named
     /// @return Name of the type for named type or an empty string view
     std::u8string_view reflect_name() const noexcept
     {
-      auto _type = type();
-      if (_type == nullptr || _type->kind != STDCOLT_EXT_RT_TYPE_KIND_NAMED)
-        return {};
-      auto ret = stdcolt_ext_rt_reflect_name(_type);
-      return {(const char8_t*)ret.data, ret.size};
+      return type().is_named() ? type().name() : u8"";
     }
   };
 
@@ -664,10 +563,9 @@ namespace stdcolt::ext::rt
   };
 
   template<typename T, typename... Ts>
-  std::optional<Any> Any::make_in_place(RuntimeContext* ctx, Ts&&... args) noexcept
+  std::optional<Any> Any::make_in_place(
+      RuntimeContextView ctx, Ts&&... args) noexcept
   {
-    STDCOLT_pre(ctx != nullptr, "Context must not be null!");
-
     auto type = type_of<T>(ctx);
     if (!type)
       return std::nullopt;
@@ -741,11 +639,9 @@ namespace stdcolt::ext::rt
 
   template<typename T, typename... Ts>
   std::optional<SharedAny> SharedAny::make_in_place(
-      RuntimeContext* ctx, Ts&&... args) noexcept
+      RuntimeContextView ctx, Ts&&... args) noexcept
   {
-    STDCOLT_pre(ctx != nullptr, "Context must not be null!");
-
-    Type t = type_of<T>(ctx);
+    TypeView t = type_of<T>(ctx);
     if (!t)
       return std::nullopt;
 
@@ -907,17 +803,18 @@ namespace stdcolt::ext::rt
         // T is the user-facing signature: Ret(*)(This, Args...)
         using ms = method_sig<T>;
 
-        auto* ctx = self.context();
-        STDCOLT_debug_assert(ctx != nullptr, "");
+        auto ctx_res = self.context();
+        STDCOLT_debug_assert(ctx_res.has_value(), "invalid context");
+        auto& ctx = *ctx_res;
 
-        Type expected_obj =
+        TypeView expected_obj =
             type_of<std::remove_cv_t<std::remove_reference_t<typename ms::obj_t>>>(
                 ctx);
         if (expected_obj != self.type())
           return typename ms::bound_t{};
 
         // Lookup using the erased method type: Ret(*)(opaque_t, Args...)
-        Type expected_method = type_of<typename ms::erased_fn_t>(ctx);
+        TypeView expected_method = type_of<typename ms::erased_fn_t>(ctx);
 
         auto res = LookupFn(self.type(), &name, expected_method, KIND);
         if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
@@ -932,13 +829,17 @@ namespace stdcolt::ext::rt
       }
       else
       {
+        auto ctx_res = self.context();
+        STDCOLT_debug_assert(ctx_res.has_value(), "invalid context");
+        auto& ctx = *ctx_res;
+
         // FIELD / STATIC_FIELD
         using ptr_t = std::conditional_t<
             KIND == STDCOLT_EXT_RT_MEMBER_FIELD,
             std::conditional_t<std::is_const_v<Self>, const T*, T*>,
             std::conditional_t<std::is_pointer_v<T>, T, T*>>;
 
-        auto res = LookupFn(self.type(), &name, type_of<T>(self.context()), KIND);
+        auto res = LookupFn(self.type(), &name, type_of<T>(ctx), KIND);
         if (res.result != STDCOLT_EXT_RT_LOOKUP_FOUND)
           return (ptr_t) nullptr;
 
