@@ -34,4 +34,4 @@ extern "C"
             },
     };
   }
-} // namespace stdcolt::ext::rt
+}

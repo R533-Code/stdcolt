@@ -92,4 +92,4 @@ extern "C"
         .phf_lookup    = &default_phf_lookup,
     };
   }
-} // namespace stdcolt::ext::rt
+}
