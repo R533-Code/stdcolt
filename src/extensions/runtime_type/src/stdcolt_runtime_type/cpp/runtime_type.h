@@ -430,7 +430,7 @@ namespace stdcolt::ext::rt
 
   class SharedAny
   {
-    stdcolt_ext_rt_SharedAny _value{};
+    stdcolt_ext_rt_SharedAny _value;
 
     template<typename T, auto LookupFn, stdcolt_ext_rt_MemberKind KIND, class Self>
     static auto lookup_impl(Self& self, std::u8string_view member) noexcept;
@@ -597,14 +597,10 @@ namespace stdcolt::ext::rt
 
   class WeakAny
   {
-    stdcolt_ext_rt_WeakAny _value{};
+    stdcolt_ext_rt_WeakAny _value;
 
   public:
-    WeakAny() noexcept
-    {
-      _value.address       = nullptr;
-      _value.control_block = nullptr;
-    }
+    WeakAny() noexcept { stdcolt_ext_rt_wany_construct_empty(&_value); }
     ~WeakAny() noexcept { stdcolt_ext_rt_wany_destroy(&_value); }
     WeakAny(const WeakAny& other) noexcept
     {
@@ -622,8 +618,7 @@ namespace stdcolt::ext::rt
     WeakAny(WeakAny&& other) noexcept
         : _value(other._value)
     {
-      other._value.address       = nullptr;
-      other._value.control_block = nullptr;
+      stdcolt_ext_rt_wany_construct_empty(&other._value);
     }
     WeakAny& operator=(WeakAny&& other) noexcept
     {
@@ -631,9 +626,8 @@ namespace stdcolt::ext::rt
         return *this;
 
       stdcolt_ext_rt_wany_destroy(&_value);
-      _value                     = other._value;
-      other._value.address       = nullptr;
-      other._value.control_block = nullptr;
+      _value = other._value;
+      stdcolt_ext_rt_wany_construct_empty(&other._value);
       return *this;
     }
     explicit WeakAny(const SharedAny& s) noexcept
@@ -654,7 +648,7 @@ namespace stdcolt::ext::rt
     SharedAny try_lock() const noexcept
     {
       SharedAny out;
-      stdcolt_ext_rt_wany_try_lock(out.c_handle(), &_value);
+      (void)stdcolt_ext_rt_wany_try_lock(out.c_handle(), &_value);
       return out;
     }
 
