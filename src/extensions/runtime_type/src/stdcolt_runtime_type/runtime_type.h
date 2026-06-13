@@ -480,8 +480,8 @@ extern "C"
 
   STDCOLT_RUNTIME_TYPE_EXPORT
   /// @brief Creates a RuntimeContext.
-  /// @param alloc The allocator to use for all VTable allocations
-  /// @param phf The default perfect hash function builder to use for named types
+  /// @param alloc The allocator to use for all VTable allocations, may be null
+  /// @param phf The default perfect hash function builder to use for named types, may be null
   /// @return RuntimeContextResult.
   /// To prevent memory leaks, use `rt_destroy` on the resulting non-null context.
   stdcolt_ext_rt_ResultRuntimeContext stdcolt_ext_rt_create(
