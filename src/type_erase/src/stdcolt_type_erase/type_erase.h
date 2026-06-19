@@ -535,11 +535,10 @@ namespace stdcolt::type_erase
                     __ABI_T __COLT_PARAM_PREFIX(HAS_TP, TEMPLATE_PARAM),            \
                     CUSTOM.to_customize_vtable()>)                                  \
                     && (!std::same_as<__ABI_T, STDCOLT_CC(TYPENAME, Template)>)     \
-                    && CUSTOM                                                       \
-                    .has_alloc_state explicit STDCOLT_CC(TYPENAME, Template)(       \
-                        __ABI_T && obj, void* alloc_ctx)                            \
+                    && (CUSTOM.has_alloc_state)                                     \
+      explicit STDCOLT_CC(TYPENAME, Template)(__ABI_T && obj, void* alloc_ctx)      \
           : alloc_state_base_t(stdcolt::type_erase::AllocState{alloc_ctx})          \
-      , _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>())     \
+          , _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>()) \
       {                                                                             \
         using abi_type_t = std::remove_cvref_t<__ABI_T>;                            \
         if constexpr (sizeof(abi_type_t) <= INLINE_BUFFER_SIZE)                     \
