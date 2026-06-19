@@ -96,23 +96,24 @@
     }                                                         \
   } while (0)
 
-#define __COLT_MAKE_ABI_TYPE_CONSTRUCTOR(NAME, PARAM_SPEC, REQUIRES, VTABLE_CALL) \
-  NAME(NAME PARAM_SPEC other)                                                     \
-  requires(REQUIRES)                                                              \
-      : _vtable(other._vtable)                                                    \
-  {                                                                               \
-    const auto sizeof_type = other.get_vtable()->TypeSize::value;                 \
-    if (sizeof_type <= INLINE_BUFFER_SIZE)                                        \
-      VTABLE_CALL(_buffer, other._buffer);                                        \
-    else                                                                          \
-    {                                                                             \
-      auto ptr = CUSTOM.alloc_fn(sizeof_type);                                    \
-      if (ptr == nullptr)                                                         \
-        throw std::bad_alloc{};                                                   \
-      __STDCOLT_TYPE_ERASE_TRY_RETHROW(                                           \
-          VTABLE_CALL(ptr, other._heap), CUSTOM.dealloc_fn(ptr));                 \
-      _heap = ptr;                                                                \
-    } /* no need to mark vtable* as we already copied it with it */               \
+#define __COLT_MAKE_ABI_TYPE_CONSTRUCTOR(NAME, PARAM_SPEC, REQUIRES, VTABLE_CALL)  \
+  NAME(NAME PARAM_SPEC other)                                                      \
+  requires(REQUIRES)                                                               \
+      : alloc_state_base_t(other.alloc_state_base())                               \
+      , _vtable(other._vtable)                                                     \
+  {                                                                                \
+    const auto sizeof_type = other.get_vtable()->TypeSize::value;                  \
+    if (sizeof_type <= INLINE_BUFFER_SIZE)                                         \
+      VTABLE_CALL(_buffer, other._buffer);                                         \
+    else                                                                           \
+    {                                                                              \
+      auto ptr = CUSTOM.alloc_fn(get_alloc_ctx(), sizeof_type);                    \
+      if (ptr == nullptr)                                                          \
+        throw std::bad_alloc{};                                                    \
+      __STDCOLT_TYPE_ERASE_TRY_RETHROW(                                            \
+          VTABLE_CALL(ptr, other._heap), CUSTOM.dealloc_fn(get_alloc_ctx(), ptr)); \
+      _heap = ptr;                                                                 \
+    } /* no need to mark vtable* as we already copied it with it */                \
   }
 
 /// @brief Contains utilities and ABI-stable types defined through `STDCOLT_TYPE_ERASE_DECLARE_TYPE`
@@ -120,16 +121,19 @@ namespace stdcolt::type_erase
 {
   /// @brief Allocation function that always fails
   /// @note To be paired with `fail_dealloc`!
+  /// @param ctx Unused allocator context
   /// @param size The size of the allocation
   /// @return Always returns nullptr
-  inline void* fail_alloc([[maybe_unused]] size_t size)
+  inline void* fail_alloc([[maybe_unused]] void* ctx, [[maybe_unused]] size_t size)
   {
     return nullptr;
   }
   /// @brief Deallocation function that does nothing.
   /// @note To be paired with `fail_alloc`!
+  /// @param ctx Unused allocator context
   /// @param to_free The allocation to free (always nullptr!)
-  inline void fail_dealloc([[maybe_unused]] void* to_free)
+  inline void fail_dealloc(
+      [[maybe_unused]] void* ctx, [[maybe_unused]] void* to_free)
   {
     STDCOLT_debug_assert(to_free == nullptr, "expected nullptr");
   }
@@ -153,10 +157,17 @@ namespace stdcolt::type_erase
     bool is_copy_constructible = false;
     /// @brief True if the wrapper should be movable
     bool is_move_constructible = true;
-    /// @brief The allocation function
-    void* (*alloc_fn)(size_t) = +[](size_t size) { return std::malloc(size); };
-    /// @brief The deallocation function
-    void (*dealloc_fn)(void*) = +[](void* ptr) { std::free(ptr); };
+    /// @brief True if alloc_fn/dealloc_fn need a runtime context pointer
+    /// (e.g. an arena or pool instance). When false, the wrapper stores no
+    /// extra state and `ctx` is always passed as nullptr.
+    bool has_alloc_state = false;
+    /// @brief The allocation function. `ctx` is the per-instance allocator
+    /// state (always nullptr when has_alloc_state is false).
+    void* (*alloc_fn)(void* ctx, size_t) = +[](void*, size_t size)
+    { return std::malloc(size); };
+    /// @brief The deallocation function. `ctx` is the per-instance allocator
+    /// state (always nullptr when has_alloc_state is false).
+    void (*dealloc_fn)(void* ctx, void*) = +[](void*, void* ptr) { std::free(ptr); };
 
     /// @brief Converts the current CustomizeABI to a CustomizeVTable.
     /// This is to remove members that are not useful for vtable generation.
@@ -194,6 +205,17 @@ namespace stdcolt::type_erase
   template<typename __ABI_T>
   struct TypeOrEmpty<false, __ABI_T>
   {
+  };
+
+  /// @brief Holds the runtime allocator context pointer for wrappers whose
+  /// `CustomizeABI::has_alloc_state` is true. Stored via `TypeOrEmpty` so
+  /// stateless allocators (the default) incur zero size cost.
+  struct AllocState
+  {
+    /// @brief Opaque pointer forwarded as the first argument to
+    /// `alloc_fn`/`dealloc_fn`. The allocator is responsible for casting it
+    /// back to its real type.
+    void* ctx;
   };
 
   /// @brief Contains the number of functions in a v-table
@@ -420,12 +442,16 @@ namespace stdcolt::type_erase
             stdcolt::type_erase::CustomizeABI CUSTOM =                              \
                 STDCOLT_CC(TYPENAME, Customization)>                                \
     struct STDCOLT_CC(TYPENAME, Template)                                           \
+        : stdcolt::type_erase::TypeOrEmpty<                                         \
+              CUSTOM.has_alloc_state, stdcolt::type_erase::AllocState>              \
     {                                                                               \
       using vtable_t = const STDCOLT_CC(                                            \
           TYPENAME, VTable)<__COLT_VTABLE_T_ARGS(HAS_TP, TEMPLATE_PARAM)>;          \
       static_assert(alignof(vtable_t) > 2);                                         \
       static constexpr size_t INLINE_BUFFER_SIZE =                                  \
           stdcolt::type_erase::align_up<alignof(void*)>(CUSTOM.inline_buffer_size); \
+      using alloc_state_base_t = stdcolt::type_erase::TypeOrEmpty<                  \
+          CUSTOM.has_alloc_state, stdcolt::type_erase::AllocState>;                 \
                                                                                     \
     private:                                                                        \
       vtable_t* _vtable;                                                            \
@@ -434,6 +460,17 @@ namespace stdcolt::type_erase
         alignas(std::max_align_t) char _buffer[INLINE_BUFFER_SIZE];                 \
         void* _heap;                                                                \
       };                                                                            \
+      inline const alloc_state_base_t& alloc_state_base() const noexcept            \
+      {                                                                             \
+        return *this;                                                               \
+      }                                                                             \
+      inline void* get_alloc_ctx() const noexcept                                   \
+      {                                                                             \
+        if constexpr (CUSTOM.has_alloc_state)                                       \
+          return this->alloc_state_base_t::value.ctx;                               \
+        else                                                                        \
+          return nullptr;                                                           \
+      }                                                                             \
       inline bool on_stack() const noexcept                                         \
       {                                                                             \
         return !stdcolt::type_erase::test_lowest_bit(_vtable);                      \
@@ -467,13 +504,14 @@ namespace stdcolt::type_erase
       {                                                                             \
         get_vtable()->DestructorFn::value(get_ptr());                               \
         if (on_heap())                                                              \
-          CUSTOM.dealloc_fn(_heap);                                                 \
+          CUSTOM.dealloc_fn(get_alloc_ctx(), _heap);                                \
       }                                                                             \
       template<typename __ABI_T>                                                    \
         requires(::NAMESPACE::CONCEPT_NAME<                                         \
                     __ABI_T __COLT_PARAM_PREFIX(HAS_TP, TEMPLATE_PARAM),            \
                     CUSTOM.to_customize_vtable()>)                                  \
                 && (!std::same_as<__ABI_T, STDCOLT_CC(TYPENAME, Template)>)         \
+                && (!CUSTOM.has_alloc_state)                                        \
       explicit STDCOLT_CC(TYPENAME, Template)(__ABI_T && obj)                       \
           : _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>()) \
       {                                                                             \
@@ -482,12 +520,38 @@ namespace stdcolt::type_erase
           new (_buffer) abi_type_t(std::forward<__ABI_T>(obj));                     \
         else                                                                        \
         {                                                                           \
-          auto ptr = CUSTOM.alloc_fn(sizeof(abi_type_t));                           \
+          auto ptr = CUSTOM.alloc_fn(nullptr, sizeof(abi_type_t));                  \
           if (ptr == nullptr)                                                       \
             throw std::bad_alloc{};                                                 \
           __STDCOLT_TYPE_ERASE_TRY_RETHROW(                                         \
               (new (ptr) abi_type_t(std::forward<__ABI_T>(obj))),                   \
-              CUSTOM.dealloc_fn(ptr));                                              \
+              CUSTOM.dealloc_fn(nullptr, ptr));                                     \
+          _heap   = ptr;                                                            \
+          _vtable = stdcolt::type_erase::set_lowest_bit(_vtable);                   \
+        }                                                                           \
+      }                                                                             \
+      template<typename __ABI_T>                                                    \
+        requires(::NAMESPACE::CONCEPT_NAME<                                         \
+                    __ABI_T __COLT_PARAM_PREFIX(HAS_TP, TEMPLATE_PARAM),            \
+                    CUSTOM.to_customize_vtable()>)                                  \
+                    && (!std::same_as<__ABI_T, STDCOLT_CC(TYPENAME, Template)>)     \
+                    && CUSTOM                                                       \
+                    .has_alloc_state explicit STDCOLT_CC(TYPENAME, Template)(       \
+                        __ABI_T && obj, void* alloc_ctx)                            \
+          : alloc_state_base_t(stdcolt::type_erase::AllocState{alloc_ctx})          \
+      , _vtable(vtable_t::template make_vtable<std::remove_cvref_t<__ABI_T>>())     \
+      {                                                                             \
+        using abi_type_t = std::remove_cvref_t<__ABI_T>;                            \
+        if constexpr (sizeof(abi_type_t) <= INLINE_BUFFER_SIZE)                     \
+          new (_buffer) abi_type_t(std::forward<__ABI_T>(obj));                     \
+        else                                                                        \
+        {                                                                           \
+          auto ptr = CUSTOM.alloc_fn(alloc_ctx, sizeof(abi_type_t));                \
+          if (ptr == nullptr)                                                       \
+            throw std::bad_alloc{};                                                 \
+          __STDCOLT_TYPE_ERASE_TRY_RETHROW(                                         \
+              (new (ptr) abi_type_t(std::forward<__ABI_T>(obj))),                   \
+              CUSTOM.dealloc_fn(alloc_ctx, ptr));                                   \
           _heap   = ptr;                                                            \
           _vtable = stdcolt::type_erase::set_lowest_bit(_vtable);                   \
         }                                                                           \
