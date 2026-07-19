@@ -47,7 +47,7 @@ namespace stdcolt::alloc
              && static_cast<const SECONDARY&>(*this)
                     == static_cast<const SECONDARY&>(other);
     }
-    SegregatorAllocator cppstatic constexpr AllocatorInfo allocator_info = {
+    static constexpr AllocatorInfo allocator_info = {
         .is_thread_safe      = PRIMARY::allocator_info.is_thread_safe
                                && SECONDARY::allocator_info.is_thread_safe,
         .is_fallible         = PRIMARY::allocator_info.is_fallible
