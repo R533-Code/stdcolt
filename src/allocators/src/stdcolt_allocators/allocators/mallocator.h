@@ -26,6 +26,7 @@ namespace stdcolt::alloc
         .is_nothrow_fallible = true,
         .returns_exact_size  = true,
         .alignment           = PREFERRED_ALIGNMENT,
+        .always_equal        = true,
     };
 
     STDCOLT_ALLOCATORS_EXPORT
@@ -55,6 +56,7 @@ namespace stdcolt::alloc
         .is_nothrow_fallible = true,
         .returns_exact_size  = true,
         .alignment           = PREFERRED_ALIGNMENT,
+        .always_equal        = true,
     };
 
     STDCOLT_ALLOCATORS_EXPORT

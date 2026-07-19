@@ -71,6 +71,9 @@ namespace stdcolt::alloc
     bool returns_exact_size = false;
     /// @brief The minimum alignment guaranteed by the allocator
     size_t alignment = 1;
+    /// @brief True if every instance of this allocator type is always interchangeable.
+    /// A block obtained from any instance may be safely deallocated by any other instance of the same type, with no runtime check needed at all.
+    bool always_equal = false;
   };
 
   class Layout
@@ -137,6 +140,11 @@ namespace stdcolt::alloc
   static constexpr bool is_allocate_nothrow_v =
       noexcept(std::declval<ALLOCATOR>().allocate(std::declval<Layout>()));
 
+  template<typename T>
+  concept IsEquatableAllocator = IsAllocator<T> && requires(const T alloc) {
+    { alloc == alloc } noexcept -> std::same_as<bool>;
+  };
+
   /// @brief The function to call on allocation failure.
   /// The function receives the attempted allocation, and
   /// the source location of the allocation.
@@ -202,6 +210,11 @@ namespace stdcolt::alloc
   public:
     static constexpr AllocatorInfo allocator_info = ALLOCATOR::allocator_info;
 
+    constexpr bool operator==(const AllocatorRef& other) const noexcept
+    {
+      return _allocator == other._allocator;
+    }
+
     constexpr AllocatorRef(ALLOCATOR& allocator) noexcept
         : _allocator(&allocator)
     {
@@ -230,7 +243,17 @@ namespace stdcolt::alloc
     static_assert(IsAllocator<ALLOCATOR>);
 
   public:
-    static constexpr AllocatorInfo allocator_info = ALLOCATOR::allocator_info;
+    static constexpr AllocatorInfo allocator_info = []
+    {
+      AllocatorInfo info = ALLOCATOR::allocator_info;
+      info.always_equal  = true;
+      return info;
+    }();
+
+    constexpr bool operator==(const AllocatorGlobalRef&) const noexcept
+    {
+      return true;
+    }
 
     Block allocate(Layout request) const noexcept(is_allocate_nothrow_v<ALLOCATOR>)
     {

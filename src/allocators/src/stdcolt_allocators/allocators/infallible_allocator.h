@@ -28,7 +28,15 @@ namespace stdcolt::alloc
         .is_nothrow_fallible = false,
         .returns_exact_size  = inherited_info.returns_exact_size,
         .alignment           = inherited_info.alignment,
+        .always_equal        = inherited_info.always_equal,
     };
+
+    constexpr bool operator==(const InfallibleAllocator& other) const noexcept
+      requires IsEquatableAllocator<ALLOCATOR>
+    {
+      return static_cast<const ALLOCATOR&>(*this)
+             == static_cast<const ALLOCATOR&>(other);
+    }
 
     template<typename... Ts>
     constexpr InfallibleAllocator(Ts&&... vals)

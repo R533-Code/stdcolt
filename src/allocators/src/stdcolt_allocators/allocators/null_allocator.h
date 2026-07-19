@@ -25,6 +25,7 @@ namespace stdcolt::alloc
         .is_nothrow_fallible = true,
         .returns_exact_size  = true,
         .alignment           = PREFERRED_ALIGNMENT,
+        .always_equal        = true,
     };
 
     constexpr Block allocate(Layout) const noexcept { return nullblock; }
@@ -45,6 +46,7 @@ namespace stdcolt::alloc
         .is_nothrow_fallible = false,
         .returns_exact_size  = true,
         .alignment           = PREFERRED_ALIGNMENT,
+        .always_equal        = true,
     };
 
     [[noreturn]]
@@ -70,6 +72,7 @@ namespace stdcolt::alloc
         .is_fallible        = false,
         .returns_exact_size = true,
         .alignment          = PREFERRED_ALIGNMENT,
+        .always_equal       = true,
     };
 
     [[noreturn]]

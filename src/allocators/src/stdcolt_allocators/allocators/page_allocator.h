@@ -32,6 +32,7 @@ namespace stdcolt::alloc
         .is_nothrow_fallible = true,
         .returns_exact_size  = false,
         .alignment           = MIN_PAGE_SIZE,
+        .always_equal        = true,
     };
 
     STDCOLT_ALLOCATORS_EXPORT
