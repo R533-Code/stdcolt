@@ -47,28 +47,7 @@ namespace stdcolt::alloc
              && static_cast<const SECONDARY&>(*this)
                     == static_cast<const SECONDARY&>(other);
     }
-    static constexpr AllocatorInfo allocator_info = {
-        .is_thread_safe      = PRIMARY::allocator_info.is_thread_safe
-                               && SECONDARY::allocator_info.is_thread_safe,
-        .is_fallible         = PRIMARY::allocator_info.is_fallible
-                               || SECONDARY::allocator_info.is_fallible,
-        .is_nothrow_fallible = PRIMARY::allocator_info.is_nothrow_fallible
-                               && SECONDARY::allocator_info.is_nothrow_fallible,
-        .returns_exact_size  = PRIMARY::allocator_info.returns_exact_size
-                               && SECONDARY::allocator_info.returns_exact_size,
-        .alignment           = min_of(
-            PRIMARY::allocator_info.alignment, SECONDARY::allocator_info.alignment),
-        .always_equal = PRIMARY::allocator_info.always_equal
-                        && SECONDARY::allocator_info.always_equal,
-    };
 
-    constexpr bool operator==(const SegregatorAllocator& other) const noexcept
-      requires IsEquatableAllocator<PRIMARY> && IsEquatableAllocator<SECONDARY>
-    {
-      return static_cast<const PRIMARY&>(*this) == static_cast<const PRIMARY&>(other)
-             && static_cast<const SECONDARY&>(*this)
-                    == static_cast<const SECONDARY&>(other);
-    }
     template<typename... Args>
     FallbackAllocator(Args&&... args)
         : PRIMARY(std::forward<Args>(args)...)
