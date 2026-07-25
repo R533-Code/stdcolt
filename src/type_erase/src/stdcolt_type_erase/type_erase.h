@@ -119,6 +119,15 @@
 /// @brief Contains utilities and ABI-stable types defined through `STDCOLT_TYPE_ERASE_DECLARE_TYPE`
 namespace stdcolt::type_erase
 {
+  inline void* default_alloc_fn(void*, size_t size)
+  {
+    return std::malloc(size);
+  }
+  inline void default_dealloc_fn(void*, void* ptr)
+  {
+    std::free(ptr);
+  }
+
   /// @brief Allocation function that always fails
   /// @note To be paired with `fail_dealloc`!
   /// @param ctx Unused allocator context
@@ -163,11 +172,10 @@ namespace stdcolt::type_erase
     bool has_alloc_state = false;
     /// @brief The allocation function. `ctx` is the per-instance allocator
     /// state (always nullptr when has_alloc_state is false).
-    void* (*alloc_fn)(void* ctx, size_t) = +[](void*, size_t size)
-    { return std::malloc(size); };
+    void* (*alloc_fn)(void* ctx, size_t) = &default_alloc_fn;
     /// @brief The deallocation function. `ctx` is the per-instance allocator
     /// state (always nullptr when has_alloc_state is false).
-    void (*dealloc_fn)(void* ctx, void*) = +[](void*, void* ptr) { std::free(ptr); };
+    void (*dealloc_fn)(void* ctx, void*) = &default_dealloc_fn;
 
     /// @brief Converts the current CustomizeABI to a CustomizeVTable.
     /// This is to remove members that are not useful for vtable generation.
