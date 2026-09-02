@@ -455,6 +455,21 @@ namespace stdcolt::ext::rt
       return {(T*)ret.data(), ret.size()};
     }
 
+    /// @brief Tries to deep-copy the underlying stored object into a new,
+    /// independent SharedAny with its own storage and control block.
+    /// This operation may fail due to memory allocation or if the object
+    /// type is not actually copyable.
+    /// @return nullopt if the clone was not successful, else a new,
+    /// independent SharedAny holding a copy of the stored object
+    std::optional<SharedAny> clone() const noexcept
+    {
+      SharedAny val;
+      if (stdcolt_ext_rt_sany_construct_from_clone(&val._value, &_value)
+          != STDCOLT_EXT_RT_VALUE_SUCCESS)
+        return std::nullopt;
+      return std::move(val);
+    }
+
     /***************************/
     // MEMBER LOOKUPS
     /***************************/

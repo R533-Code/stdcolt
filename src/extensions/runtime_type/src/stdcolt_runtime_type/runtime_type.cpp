@@ -1969,6 +1969,45 @@ extern "C" void stdcolt_ext_rt_sany_construct_from_copy(
   out->control_block = cb;
 }
 
+extern "C" stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_sany_construct_from_clone(
+    stdcolt_ext_rt_SharedAny* out, const stdcolt_ext_rt_SharedAny* to_copy)
+{
+  STDCOLT_pre(out != nullptr, "expected non-null parameter");
+  STDCOLT_pre(to_copy != nullptr, "expected non-null parameter");
+
+  if (out == to_copy)
+    return STDCOLT_EXT_RT_VALUE_SUCCESS;
+
+  Type type = to_copy->header.type;
+  if (type == nullptr)
+  {
+    stdcolt_ext_rt_sany_construct_empty(out);
+    return STDCOLT_EXT_RT_VALUE_SUCCESS;
+  }
+
+  if (!is_type_copyable(type))
+  {
+    stdcolt_ext_rt_sany_construct_empty(out);
+    return STDCOLT_EXT_RT_VALUE_NOT_COPYABLE;
+  }
+
+  if (auto init_result = stdcolt_ext_rt_sany_init(out, type);
+      init_result != STDCOLT_EXT_RT_VALUE_SUCCESS)
+  {
+    return STDCOLT_EXT_RT_VALUE_FAIL_MEMORY;
+  }
+
+  if (!rt_copy_any(type, out->header.address, to_copy->header.address))
+  {
+    auto* cb = reinterpret_cast<SharedAnyControlBlock*>(out->control_block);
+    cb_delete_self(cb);
+    stdcolt_ext_rt_sany_construct_empty(out);
+    return STDCOLT_EXT_RT_VALUE_FAIL_COPY;
+  }
+
+  return STDCOLT_EXT_RT_VALUE_SUCCESS;
+}
+
 extern "C" void stdcolt_ext_rt_sany_destroy(stdcolt_ext_rt_SharedAny* val)
 {
   // noop on null or empty

@@ -857,9 +857,19 @@ extern "C"
   /// `to_copy` and increments the underlying reference count.
   /// @param out The value to initialize
   /// @param to_copy `SharedAny` to copy.
-  /// @return True on success, false on failure
   /// @pre No parameter may be null, else UB!
   void stdcolt_ext_rt_sany_construct_from_copy(
+      stdcolt_ext_rt_SharedAny* out, const stdcolt_ext_rt_SharedAny* to_copy);
+
+  STDCOLT_RUNTIME_TYPE_EXPORT
+  /// @brief Constructs a `SharedAny` as a deep-copy of another `SharedAny`.
+  /// Creates a new `SharedAny` in `out` that refers to a copy of the underlying
+  /// value of `to_copy`.
+  /// @param out The value to initialize
+  /// @param to_copy `SharedAny` whose underlying value to copy.
+  /// @return True on success, false on failure
+  /// @pre No parameter may be null, else UB!
+  stdcolt_ext_rt_ResultValueKind stdcolt_ext_rt_sany_construct_from_clone(
       stdcolt_ext_rt_SharedAny* out, const stdcolt_ext_rt_SharedAny* to_copy);
 
   STDCOLT_RUNTIME_TYPE_EXPORT
